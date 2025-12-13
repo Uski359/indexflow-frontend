@@ -1,10 +1,13 @@
+"use client";
+
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import type { ReactNode } from 'react';
+import { Toaster } from 'react-hot-toast';
 
+import { AppProviders } from '@/providers/app-providers';
 import Layout from '@/components/Layout';
 import { ChainProvider } from '@/hooks/useChain';
-import Providers from './providers';
 
 import '../styles/globals.css';
 
@@ -17,13 +20,14 @@ export const metadata: Metadata = {
 
 const RootLayout = ({ children }: { children: ReactNode }) => {
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
       <body className={`${inter.className} bg-[#0a0a0f] text-white antialiased`}>
-        <Providers>
+        <AppProviders>
           <ChainProvider>
             <Layout>{children}</Layout>
           </ChainProvider>
-        </Providers>
+          <Toaster position="bottom-right" />
+        </AppProviders>
       </body>
     </html>
   );
