@@ -29,21 +29,54 @@ const formatValue = (value: string) => {
   return num.toLocaleString();
 };
 
-const formatTimestamp = (timestamp?: number) =>
-  timestamp ? new Date(timestamp).toLocaleString() : 'N/A';
+const formatTimestamp = (timestamp?: number | string) => {
+  if (!timestamp) return 'N/A';
+
+  const parsed = Number(timestamp);
+  if (!Number.isNaN(parsed)) {
+    // If seconds, convert to ms
+    const millis = parsed < 1e12 ? parsed * 1000 : parsed;
+    return new Date(millis).toLocaleString();
+  }
+
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? 'N/A' : date.toLocaleString();
+};
+
+const getExplorerUrl = (chain: string | undefined, txHash: string) => {
+  const normalized = (chain ?? '').toLowerCase();
+  const map: Record<string, string> = {
+    sepolia: 'https://sepolia.etherscan.io/tx/',
+    ethereum: 'https://etherscan.io/tx/',
+    polygon: 'https://polygonscan.com/tx/',
+    arbitrum: 'https://arbiscan.io/tx/',
+    base: 'https://basescan.org/tx/',
+    optimism: 'https://optimistic.etherscan.io/tx/'
+  };
+
+  const base = map[normalized] ?? map.ethereum;
+  return `${base}${txHash}`;
+};
 
 const TransferRow = ({ transfer }: { transfer: Transfer }) => {
   const block = transfer.blockNumber ?? transfer.block ?? 0;
+  const valueDisplay = transfer.value ? formatValue(transfer.value) : '—';
+  const explorerUrl = getExplorerUrl(transfer.chain, transfer.txHash);
 
   return (
     <tr className="border-b border-[#1f1f2a] last:border-0">
       <td className="px-3 py-3 text-sm text-gray-300">{transfer.chain?.toUpperCase()}</td>
       <td className="px-3 py-3 text-sm text-gray-300">{block}</td>
       <td className="px-3 py-3 text-sm text-gray-300">
-        <div className="flex items-center gap-1 font-mono text-xs">
+        <Link
+          href={explorerUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1 font-mono text-xs text-accent hover:text-accent/80"
+        >
           <span>{shorten(transfer.txHash, 5)}</span>
-          <ExternalLink size={14} className="text-gray-500" />
-        </div>
+          <ExternalLink size={14} className="text-current" />
+        </Link>
       </td>
       <td className="px-3 py-3 text-sm">
         <p className="font-mono text-xs text-gray-200">{shorten(transfer.from, 6)}</p>
@@ -53,7 +86,7 @@ const TransferRow = ({ transfer }: { transfer: Transfer }) => {
       </td>
       <td className="px-3 py-3 text-sm text-white">
         <span className="rounded-full bg-accent/10 px-2 py-1 text-xs text-accent">
-          {formatValue(transfer.value)}
+          {valueDisplay}
         </span>
       </td>
       <td className="px-3 py-3 text-sm text-gray-400">{formatTimestamp(transfer.timestamp)}</td>
