@@ -45,13 +45,23 @@ const unwrap = <T>(payload: unknown): T => {
   return payload as T;
 };
 
-const normalizeHealth = (value: any): IndexerHealth => ({
-  chain: value?.chain ?? 'unknown',
-  latestIndexedBlock:
-    value?.latestIndexedBlock ?? value?.latestBlock ?? value?.latest ?? null,
-  providerBlock: value?.providerBlock ?? value?.provider ?? null,
-  synced: Boolean(value?.synced ?? value?.ok ?? false)
-});
+const normalizeHealth = (value: unknown): IndexerHealth => {
+  const payload = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+
+  return {
+    chain: (payload.chain as string) ?? 'unknown',
+    latestIndexedBlock:
+      (payload.latestIndexedBlock as number | null | undefined) ??
+      (payload.latestBlock as number | null | undefined) ??
+      (payload.latest as number | null | undefined) ??
+      null,
+    providerBlock:
+      (payload.providerBlock as number | null | undefined) ??
+      (payload.provider as number | null | undefined) ??
+      null,
+    synced: Boolean(payload.synced ?? payload.ok ?? false)
+  };
+};
 
 export const fetchRecentTransfers = async (options?: {
   chain?: string;
@@ -146,7 +156,7 @@ export const fetchHealth = async (chain?: string): Promise<IndexerHealth> => {
   for (const candidate of candidates) {
     try {
       const raw = await api(candidate);
-      const payload = unwrap<any>(raw);
+      const payload = unwrap<unknown>(raw);
 
       if (
         payload &&
