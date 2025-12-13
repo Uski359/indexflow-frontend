@@ -70,11 +70,61 @@ export const fetchRecentTransfers = async (options?: {
 }): Promise<Transfer[]> => {
   const { chain, limit, address } = options ?? {};
 
+  type RawTransfer = {
+    chain?: string;
+    chainId?: string | number;
+    blockNumber?: number;
+    block?: number;
+    txHash?: string;
+    hash?: string;
+    from?: string;
+    to?: string;
+    value?: string | number;
+    amount?: string | number;
+    transferValue?: string | number;
+    timestamp?: number;
+  };
+
+  const chainIdToName: Record<string, string> = {
+    "1": "ethereum",
+    "10": "optimism",
+    "56": "bsc",
+    "137": "polygon",
+    "42161": "arbitrum",
+    "8453": "base",
+    "11155111": "sepolia"
+  };
+
+  const normalizeTransfer = (item: RawTransfer): Transfer => {
+    const chainName =
+      item.chain ?? chainIdToName[String(item.chainId ?? "")] ?? (chain ?? "ethereum");
+
+    const valueRaw = item.value ?? item.amount ?? item.transferValue ?? "";
+    const timestampRaw = item.timestamp;
+    const timestamp =
+      typeof timestampRaw === "number"
+        ? timestampRaw < 1e12
+          ? timestampRaw * 1000
+          : timestampRaw
+        : undefined;
+
+    return {
+      chain: chainName,
+      blockNumber: item.blockNumber ?? item.block,
+      block: item.block,
+      txHash: item.txHash ?? item.hash ?? "",
+      from: item.from ?? "",
+      to: item.to ?? "",
+      value: typeof valueRaw === "string" ? valueRaw : valueRaw?.toString?.() ?? "",
+      timestamp
+    };
+  };
+
   if (address) {
     const byAddress = await api(
       withParams(`/api/transfers/${encodeURIComponent(address)}`, { chain })
     );
-    return unwrap<Transfer[]>(byAddress);
+    return unwrap<RawTransfer[]>(byAddress).map(normalizeTransfer);
   }
 
   const candidates = [
@@ -87,7 +137,7 @@ export const fetchRecentTransfers = async (options?: {
   for (const candidate of candidates) {
     try {
       const result = await api(candidate);
-      const transfers = unwrap<Transfer[]>(result);
+      const transfers = unwrap<RawTransfer[]>(result).map(normalizeTransfer);
       return typeof limit === 'number' ? transfers.slice(0, limit) : transfers;
     } catch (error) {
       lastError = error;

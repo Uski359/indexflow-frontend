@@ -3,6 +3,7 @@
 import classNames from 'classnames';
 import { ArrowRightLeft, ExternalLink, Clock3 } from 'lucide-react';
 import Link from 'next/link';
+import { formatEther } from 'viem';
 
 import { useTransfers } from '@/hooks/useTransfers';
 import type { Transfer } from '@/types';
@@ -20,12 +21,20 @@ const shorten = (value: string, size = 4) =>
   value.length > size * 2 ? `${value.slice(0, size + 2)}...${value.slice(-size)}` : value;
 
 const formatValue = (value: string) => {
+  if (!value) return '—';
+
+  if (/^-?\d+$/.test(value)) {
+    try {
+      const eth = Number(formatEther(BigInt(value)));
+      return `${eth.toLocaleString(undefined, { maximumFractionDigits: 4 })} IFLW`;
+    } catch {
+      // fall through to generic formatting
+    }
+  }
+
   const num = Number(value);
   if (Number.isNaN(num)) return value;
-  if (num >= 1e18) return `${(num / 1e18).toFixed(3)} IFLW`;
-  if (num >= 1e9) return `${(num / 1e9).toFixed(2)}B`;
-  if (num >= 1e6) return `${(num / 1e6).toFixed(2)}M`;
-  if (num >= 1e3) return `${(num / 1e3).toFixed(2)}K`;
+  if (num >= 1e6) return `${num.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
   return num.toLocaleString();
 };
 
