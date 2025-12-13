@@ -11,13 +11,13 @@ const buildFaucetUrl = () => {
 };
 
 const FaucetButton = () => {
-  const { address } = useAccount();
+  const { address, isConnected } = useAccount();
   const [loading, setLoading] = useState(false);
 
   const faucetUrl = useMemo(() => buildFaucetUrl(), []);
 
   const requestFaucet = async () => {
-    if (!address) {
+    if (!isConnected || !address) {
       toast.error("Please connect your wallet");
       return;
     }

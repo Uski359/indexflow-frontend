@@ -4,6 +4,7 @@ import { Sparkles } from 'lucide-react';
 
 import ChainSelector from './ChainSelector';
 import FaucetButton from './FaucetButton';
+import WalletButton from './WalletButton';
 
 const Topbar = () => {
   return (
@@ -18,6 +19,7 @@ const Topbar = () => {
         </div>
       </div>
       <div className="flex items-center gap-3">
+        <WalletButton />
         <FaucetButton />
         <ChainSelector />
       </div>
