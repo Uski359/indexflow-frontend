@@ -1,24 +1,26 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { WagmiConfig, createConfig, http } from "wagmi";
+import { sepolia } from "wagmi/chains";
+import { injected } from "wagmi/connectors";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "react-hot-toast";
-import { WagmiConfig } from "wagmi";
 
-import { wagmiConfig } from "@/lib/wagmi";
-
-type ProvidersProps = {
-  children: ReactNode;
-};
+const config = createConfig({
+  chains: [sepolia],
+  connectors: [injected()],
+  transports: {
+    [sepolia.id]: http(),
+  },
+  ssr: true,
+});
 
 const queryClient = new QueryClient();
 
-export default function Providers({ children }: ProvidersProps) {
+export function AppProviders({ children }: { children: React.ReactNode }) {
   return (
-    <WagmiConfig config={wagmiConfig}>
+    <WagmiConfig config={config}>
       <QueryClientProvider client={queryClient}>
         {children}
-        <Toaster position="bottom-right" />
       </QueryClientProvider>
     </WagmiConfig>
   );

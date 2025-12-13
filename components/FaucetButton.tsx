@@ -18,7 +18,7 @@ const FaucetButton = () => {
 
   const requestFaucet = async () => {
     if (!isConnected || !address) {
-      toast.error("Please connect your wallet");
+      toast("Connect your wallet first", { icon: "🔌" });
       return;
     }
 
@@ -31,10 +31,17 @@ const FaucetButton = () => {
         body: JSON.stringify({ address })
       });
 
+      if (res.status === 429) {
+        toast("Already claimed. Cooldown active ⏳", { icon: "⏳" });
+        setLoading(false);
+        return;
+      }
+
       const data = await res.json();
 
       if (!res.ok) {
         toast.error(data?.error || "Faucet error");
+        setLoading(false);
         return;
       }
 
