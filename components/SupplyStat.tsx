@@ -11,7 +11,13 @@ const SupplyStat = () => {
   const { supply, isLoading, error } = useStats();
   const value = supply?.totalSupply;
 
-  const display = error ? 'Error' : isLoading ? '...' : formatLargeNumber(value, { decimals: 18 });
+  const supplyDecimals = Number(process.env.NEXT_PUBLIC_SUPPLY_DECIMALS ?? 9);
+  const display =
+    error || supplyDecimals < 0
+      ? 'Error'
+      : isLoading
+        ? '...'
+        : formatLargeNumber(value, { decimals: supplyDecimals });
   const fullValueLabel =
     value === undefined || value === null
       ? 'N/A'
