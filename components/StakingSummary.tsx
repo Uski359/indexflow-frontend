@@ -5,6 +5,7 @@ import { ShieldCheck, Sparkles } from 'lucide-react';
 import classNames from 'classnames';
 
 import { useGlobalStaking } from '@/hooks/useStaking';
+import { formatLargeNumber } from '@/lib/format';
 
 import Card from './Card';
 
@@ -12,9 +13,7 @@ const formatTokenAmount = (value?: string) => {
   if (!value) return '0';
   const num = Number(value) / 1e18;
   if (!Number.isFinite(num)) return value;
-  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(2)}M`;
-  if (num >= 1_000) return `${(num / 1_000).toFixed(2)}K`;
-  return num.toFixed(2);
+  return formatLargeNumber(num);
 };
 
 const StatPill = ({
