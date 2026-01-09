@@ -3,12 +3,13 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { Route } from 'next';
-import { ActivitySquare, HeartPulse, LayoutDashboard, Wallet } from 'lucide-react';
+import { ActivitySquare, HeartPulse, LayoutDashboard, ShieldCheck, Wallet } from 'lucide-react';
 import classNames from 'classnames';
 
 const navItems: { href: Route; label: string; icon: typeof LayoutDashboard }[] = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/transfers', label: 'Transfers', icon: ActivitySquare },
+  { href: '/proof-of-usage', label: 'Proof-of-Usage', icon: ShieldCheck },
   { href: '/health', label: 'Health', icon: HeartPulse }
 ];
 
