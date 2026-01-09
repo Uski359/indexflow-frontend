@@ -14,7 +14,7 @@ const ProofOfUsagePage = () => {
     setResult(null);
 
     try {
-      const response = await fetch('https://api.indexflow.io/api/proof-of-usage', {
+      const response = await fetch('https://api.indexflow.network/api/proof-of-usage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wallet })
