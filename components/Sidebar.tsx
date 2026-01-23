@@ -3,7 +3,14 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { Route } from 'next';
-import { ActivitySquare, HeartPulse, LayoutDashboard, ShieldCheck, Wallet } from 'lucide-react';
+import {
+  ActivitySquare,
+  HeartPulse,
+  LayoutDashboard,
+  ShieldCheck,
+  Sparkles,
+  Wallet
+} from 'lucide-react';
 import classNames from 'classnames';
 
 const navItems: { href: Route; label: string; icon: typeof LayoutDashboard }[] = [
@@ -55,6 +62,14 @@ const Sidebar = () => {
             </Link>
           );
         })}
+
+        <a
+          href="https://www.indexflow.network/demo"
+          className="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-gray-400 transition hover:bg-[#111118]/70 hover:text-white"
+        >
+          <Sparkles size={18} className="text-gray-500 transition group-hover:text-accent" />
+          <span>Demo</span>
+        </a>
       </nav>
 
       <div className="rounded-lg border border-[#1f1f2a] bg-[#111118] px-3 py-4 text-sm text-gray-400">
