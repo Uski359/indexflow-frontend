@@ -272,3 +272,39 @@ export const fetchUserContributions = async (
   );
   return unwrap<Contribution[]>(result);
 };
+
+export const getDemoApiBaseUrl = () => {
+  const base = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
+  const trimmed = base.replace(/\/$/, '');
+  return trimmed.length ? trimmed : null;
+};
+
+export const demoApiFetch = async <T>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> => {
+  const baseUrl = getDemoApiBaseUrl();
+  if (!baseUrl) {
+    throw new Error(
+      'NEXT_PUBLIC_API_BASE_URL is not set. Add it to your frontend environment.'
+    );
+  }
+
+  const headers = new Headers(options.headers);
+  if (options.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  const res = await fetch(`${baseUrl}${path}`, {
+    ...options,
+    headers
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    const detail = text ? ` ${text}` : '';
+    throw new Error(`Request failed (${res.status}).${detail}`);
+  }
+
+  return (await res.json()) as T;
+};
