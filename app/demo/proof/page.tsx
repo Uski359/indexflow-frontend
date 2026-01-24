@@ -68,9 +68,9 @@ const DemoProofPage = () => {
   );
 
   useEffect(() => {
-    const allowedSorts = insightsEnabled
-      ? (['score_desc', 'farm_desc', 'tx_desc', 'days_desc', 'unique_desc', 'wallet_asc'] as const)
-      : (['tx_desc', 'days_desc', 'unique_desc', 'wallet_asc'] as const);
+    const allowedSorts: ProofFilterState['sortBy'][] = insightsEnabled
+      ? ['score_desc', 'farm_desc', 'tx_desc', 'days_desc', 'unique_desc', 'wallet_asc']
+      : ['tx_desc', 'days_desc', 'unique_desc', 'wallet_asc'];
 
     setFilters((prev) => {
       if (allowedSorts.includes(prev.sortBy)) {
