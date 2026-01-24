@@ -12,16 +12,34 @@ import type {
   Transfer
 } from '@/types';
 
-const API_BASE =
-  (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000').replace(/\/$/, '');
+const getApiBaseUrl = () => {
+  const base = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
+  const trimmed = base.trim();
+  if (!trimmed) {
+    throw new Error(
+      'NEXT_PUBLIC_API_BASE_URL is not set. Add it to your frontend environment.'
+    );
+  }
+  return trimmed;
+};
 
-export const api = (path: string, init?: RequestInit) =>
-  fetch(`${API_BASE}${path}`, { cache: 'no-store', ...init }).then((res) => {
-    if (!res.ok) {
-      throw new Error(`API ${res.status} for ${path}`);
+const buildApiUrl = (path: string, baseUrl: string) => {
+  const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+  const normalizedPath = path.startsWith('/') ? path.slice(1) : path;
+  return new URL(normalizedPath, normalizedBase).toString();
+};
+
+export const api = (path: string, init?: RequestInit) => {
+  const baseUrl = getApiBaseUrl();
+  return fetch(buildApiUrl(path, baseUrl), { cache: 'no-store', ...init }).then(
+    (res) => {
+      if (!res.ok) {
+        throw new Error(`API ${res.status} for ${path}`);
+      }
+      return res.json();
     }
-    return res.json();
-  });
+  );
+};
 
 const withParams = (
   path: string,
@@ -275,7 +293,7 @@ export const fetchUserContributions = async (
 
 export const getDemoApiBaseUrl = () => {
   const base = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
-  const trimmed = base.replace(/\/$/, '');
+  const trimmed = base.trim();
   return trimmed.length ? trimmed : null;
 };
 
@@ -295,14 +313,31 @@ export const demoApiFetch = async <T>(
     headers.set('Content-Type', 'application/json');
   }
 
-  const res = await fetch(`${baseUrl}${path}`, {
-    ...options,
-    headers
-  });
+  const isDev = process.env.NODE_ENV !== 'production';
+  const url = buildApiUrl(path, baseUrl);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...options,
+      headers
+    });
+  } catch (error) {
+    if (isDev) {
+      console.error(`[demo] request failed ${path}`, error);
+    }
+    throw error;
+  }
+
+  if (isDev) {
+    console.info(`[demo] ${res.status} ${path}`);
+  }
 
   if (!res.ok) {
     const text = await res.text();
     const detail = text ? ` ${text}` : '';
+    if (isDev) {
+      console.warn(`[demo] ${res.status} ${path}${detail}`);
+    }
     throw new Error(`Request failed (${res.status}).${detail}`);
   }
 

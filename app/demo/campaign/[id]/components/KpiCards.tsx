@@ -1,14 +1,15 @@
-﻿import type { CampaignRunSummary } from '@/lib/types';
+import type { CampaignInsightsSummary, CampaignRunSummary } from '@/lib/types';
 
 type KpiCardsProps = {
-  summary: CampaignRunSummary;
+  summary: CampaignRunSummary | CampaignInsightsSummary;
+  showInsights?: boolean;
 };
 
 const formatNumber = (value: number) => new Intl.NumberFormat('en-US').format(value);
 const formatPercent = (value: number) => `${Math.round(value * 100)}%`;
 const formatOneDecimal = (value: number) => value.toFixed(1);
 
-const KpiCards = ({ summary }: KpiCardsProps) => {
+const KpiCards = ({ summary, showInsights = false }: KpiCardsProps) => {
   const cards = [
     {
       label: 'Total wallets',
@@ -39,6 +40,21 @@ const KpiCards = ({ summary }: KpiCardsProps) => {
       value: formatOneDecimal(summary.avg_unique_contracts)
     }
   ];
+
+  if (showInsights && 'suspected_farm_count' in summary) {
+    cards.push(
+      {
+        label: 'Suspected farming',
+        value: `${formatNumber(summary.suspected_farm_count)} (${formatPercent(
+          summary.suspected_farm_rate
+        )})`
+      },
+      {
+        label: 'Avg score',
+        value: formatOneDecimal(summary.avg_score)
+      }
+    );
+  }
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

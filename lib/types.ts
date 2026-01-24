@@ -41,6 +41,30 @@ export type CoreOutputV1 = {
   proof: UsageProof;
 };
 
+export type InsightV1 = {
+  overall_score: number;
+  farming_probability: number;
+  behavior_tag: 'organic' | 'suspected_farm' | 'inactive' | 'mixed';
+  insight_version: 'v1';
+};
+
+export type CommentaryV1 = {
+  commentary_version: 'v1';
+  model: string;
+  text: string;
+  created_at: number;
+};
+
+export type WalletRowWithInsights = {
+  wallet: string;
+  output: CoreOutputV1;
+  insights: InsightV1;
+  cached_core: boolean;
+  cached_insights: boolean;
+  commentary?: CommentaryV1;
+  cached_commentary?: boolean;
+};
+
 export type CampaignRunItem = {
   wallet: string;
   output: CoreOutputV1;
@@ -62,4 +86,34 @@ export type CampaignRunResponse = {
   window?: UsageWindow;
   results: CampaignRunItem[];
   summary: CampaignRunSummary;
+};
+
+export type CampaignInsightsItem = Omit<
+  WalletRowWithInsights,
+  'commentary' | 'cached_commentary'
+>;
+
+export type CampaignInsightsSummary = CampaignRunSummary & {
+  suspected_farm_count: number;
+  suspected_farm_rate: number;
+  avg_score: number;
+};
+
+export type CampaignInsightsResponse = {
+  campaign_id: string;
+  window: UsageWindow;
+  results: CampaignInsightsItem[];
+  summary: CampaignInsightsSummary;
+};
+
+export type CampaignCommentaryItem = WalletRowWithInsights & {
+  commentary: CommentaryV1;
+  cached_commentary: boolean;
+};
+
+export type CampaignCommentaryResponse = {
+  campaign_id: string;
+  window: UsageWindow;
+  results: CampaignCommentaryItem[];
+  summary?: CampaignInsightsSummary;
 };
