@@ -40,12 +40,14 @@ const WalletDetailModal = ({ row, onClose, insightsEnabled }: WalletDetailModalP
     return null;
   }
 
+  const output = row.output;
+
   const handleCopy = async () => {
     if (!navigator?.clipboard?.writeText) {
       return;
     }
     try {
-      await navigator.clipboard.writeText(row.output.proof.canonical_hash);
+      await navigator.clipboard.writeText(output.proof.canonical_hash);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -53,7 +55,7 @@ const WalletDetailModal = ({ row, onClose, insightsEnabled }: WalletDetailModalP
     }
   };
 
-  const criteria = row.output.criteria;
+  const criteria = output.criteria;
   const params = criteria?.params;
 
   return (
@@ -73,7 +75,7 @@ const WalletDetailModal = ({ row, onClose, insightsEnabled }: WalletDetailModalP
                     : 'bg-rose-500/20 text-rose-200'
                 }`}
               >
-                {row.output.verified_usage ? 'Verified usage' : 'Not verified'}
+                {output.verified_usage ? 'Verified usage' : 'Not verified'}
               </span>
               <span
                 className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${sourceStyles[row.source]}`}
@@ -97,13 +99,13 @@ const WalletDetailModal = ({ row, onClose, insightsEnabled }: WalletDetailModalP
             <div className="rounded-xl border border-white/10 bg-white/5 p-4">
               <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Tx count</p>
               <p className="mt-2 text-lg font-semibold">
-                {formatNumber(row.output.usage_summary.tx_count)}
+                {formatNumber(output.usage_summary.tx_count)}
               </p>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/5 p-4">
               <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Days active</p>
               <p className="mt-2 text-lg font-semibold">
-                {formatNumber(row.output.usage_summary.days_active)}
+                {formatNumber(output.usage_summary.days_active)}
               </p>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/5 p-4">
@@ -111,7 +113,7 @@ const WalletDetailModal = ({ row, onClose, insightsEnabled }: WalletDetailModalP
                 Unique contracts
               </p>
               <p className="mt-2 text-lg font-semibold">
-                {formatNumber(row.output.usage_summary.unique_contracts)}
+                {formatNumber(output.usage_summary.unique_contracts)}
               </p>
             </div>
           </div>
@@ -220,7 +222,7 @@ const WalletDetailModal = ({ row, onClose, insightsEnabled }: WalletDetailModalP
                 className="mt-2 font-mono text-sm text-slate-200"
                 title={row.output.proof.canonical_hash}
               >
-                {shortenHash(row.output.proof.canonical_hash)}
+                {shortenHash(output.proof.canonical_hash)}
               </p>
             </div>
             <button
