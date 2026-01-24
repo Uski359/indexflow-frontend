@@ -34,6 +34,7 @@ const defaultFilters: FilterState = {
   minUniqueContracts: 0,
   minOverallScore: 0,
   maxOverallScore: 100,
+  minFarmingProbability: 0,
   maxFarmingProbability: 100,
   tag: 'all',
   sortBy: 'score_desc',
@@ -254,6 +255,12 @@ const DemoCampaignPage = () => {
 
     const insightResults = (data as CampaignInsightsResponse)
       .results as WalletRowWithInsights[];
+    const minScore = Math.min(filters.minOverallScore, filters.maxOverallScore);
+    const maxScore = Math.max(filters.minOverallScore, filters.maxOverallScore);
+    const minFarmProbability =
+      Math.min(filters.minFarmingProbability, filters.maxFarmingProbability) / 100;
+    const maxFarmProbability =
+      Math.max(filters.minFarmingProbability, filters.maxFarmingProbability) / 100;
 
     return insightResults.filter((entry) => {
       if (
@@ -281,11 +288,13 @@ const DemoCampaignPage = () => {
         return false;
       }
 
-      const maxFarmProbability = filters.maxFarmingProbability / 100;
-      if (entry.insights.overall_score < filters.minOverallScore) {
+      if (entry.insights.overall_score < minScore) {
         return false;
       }
-      if (entry.insights.overall_score > filters.maxOverallScore) {
+      if (entry.insights.overall_score > maxScore) {
+        return false;
+      }
+      if (entry.insights.farming_probability < minFarmProbability) {
         return false;
       }
       if (entry.insights.farming_probability > maxFarmProbability) {

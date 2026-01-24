@@ -17,6 +17,7 @@ export type FilterState = {
   minUniqueContracts: number;
   minOverallScore: number;
   maxOverallScore: number;
+  minFarmingProbability: number;
   maxFarmingProbability: number;
   tag: InsightTagFilter;
   sortBy: SortBy;
@@ -56,6 +57,36 @@ const Filters = ({
     onChange({ ...value, ...patch });
   };
 
+  const handleMinScoreChange = (nextValue: string) => {
+    const minOverallScore = clampNumber(nextValue, 100);
+    const maxOverallScore = Math.max(minOverallScore, value.maxOverallScore);
+    update({ minOverallScore, maxOverallScore });
+  };
+
+  const handleMaxScoreChange = (nextValue: string) => {
+    const maxOverallScore = clampNumber(nextValue, 100);
+    const minOverallScore = Math.min(maxOverallScore, value.minOverallScore);
+    update({ minOverallScore, maxOverallScore });
+  };
+
+  const handleMinFarmChange = (nextValue: string) => {
+    const minFarmingProbability = clampNumber(nextValue, 100);
+    const maxFarmingProbability = Math.max(
+      minFarmingProbability,
+      value.maxFarmingProbability
+    );
+    update({ minFarmingProbability, maxFarmingProbability });
+  };
+
+  const handleMaxFarmChange = (nextValue: string) => {
+    const maxFarmingProbability = clampNumber(nextValue, 100);
+    const minFarmingProbability = Math.min(
+      maxFarmingProbability,
+      value.minFarmingProbability
+    );
+    update({ minFarmingProbability, maxFarmingProbability });
+  };
+
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
       {insightsEnabled && (
@@ -64,10 +95,11 @@ const Filters = ({
             type="button"
             onClick={() =>
               applyPreset({
-                minOverallScore: 70,
+                minOverallScore: 55,
                 maxOverallScore: 100,
-                maxFarmingProbability: 40,
-                tag: 'organic'
+                minFarmingProbability: 0,
+                maxFarmingProbability: 45,
+                tag: 'all'
               })
             }
             disabled={disabled}
@@ -81,6 +113,8 @@ const Filters = ({
               applyPreset({
                 minOverallScore: 0,
                 maxOverallScore: 60,
+                minFarmingProbability: 65,
+                maxFarmingProbability: 100,
                 tag: 'suspected_farm'
               })
             }
@@ -188,9 +222,7 @@ const Filters = ({
               min={0}
               max={100}
               value={value.minOverallScore}
-              onChange={(event) =>
-                update({ minOverallScore: clampNumber(event.target.value, 100) })
-              }
+              onChange={(event) => handleMinScoreChange(event.target.value)}
               disabled={disabled}
               className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white"
             />
@@ -205,9 +237,22 @@ const Filters = ({
               min={0}
               max={100}
               value={value.maxOverallScore}
-              onChange={(event) =>
-                update({ maxOverallScore: clampNumber(event.target.value, 100) })
-              }
+              onChange={(event) => handleMaxScoreChange(event.target.value)}
+              disabled={disabled}
+              className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white"
+            />
+          </label>
+        )}
+
+        {insightsEnabled && (
+          <label className="flex flex-col gap-2 text-sm text-slate-300">
+            Min farming probability (%)
+            <input
+              type="number"
+              min={0}
+              max={100}
+              value={value.minFarmingProbability}
+              onChange={(event) => handleMinFarmChange(event.target.value)}
               disabled={disabled}
               className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white"
             />
@@ -222,9 +267,7 @@ const Filters = ({
               min={0}
               max={100}
               value={value.maxFarmingProbability}
-              onChange={(event) =>
-                update({ maxFarmingProbability: clampNumber(event.target.value, 100) })
-              }
+              onChange={(event) => handleMaxFarmChange(event.target.value)}
               disabled={disabled}
               className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white"
             />
