@@ -16,7 +16,7 @@ import classNames from 'classnames';
 const navItems: { href: Route; label: string; icon: typeof LayoutDashboard }[] = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/transfers', label: 'Transfers', icon: ActivitySquare },
-  { href: '/proof-of-usage', label: 'Proof-of-Usage', icon: ShieldCheck },
+  { href: '/demo/proof', label: 'Proof-of-Usage', icon: ShieldCheck },
   { href: '/health', label: 'Health', icon: HeartPulse }
 ];
 
