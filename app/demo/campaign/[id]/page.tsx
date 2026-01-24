@@ -18,6 +18,7 @@ import KpiCards from './components/KpiCards';
 import WalletTable from './components/WalletTable';
 
 type WindowType = 'last_7_days' | 'last_14_days' | 'last_30_days';
+
 type DataSource = 'commentary' | 'insights' | 'run';
 
 const windowSeconds: Record<WindowType, number> = {
@@ -31,6 +32,11 @@ const defaultFilters: FilterState = {
   minTxCount: 0,
   minDaysActive: 0,
   minUniqueContracts: 0,
+  minOverallScore: 0,
+  maxOverallScore: 100,
+  maxFarmingProbability: 100,
+  tag: 'all',
+  sortBy: 'score_desc',
   cachedOnly: false
 };
 
@@ -248,6 +254,7 @@ const DemoCampaignPage = () => {
 
     const insightResults = (data as CampaignInsightsResponse)
       .results as WalletRowWithInsights[];
+
     return insightResults.filter((entry) => {
       if (
         filters.cachedOnly &&
@@ -274,9 +281,89 @@ const DemoCampaignPage = () => {
         return false;
       }
 
+      const maxFarmProbability = filters.maxFarmingProbability / 100;
+      if (entry.insights.overall_score < filters.minOverallScore) {
+        return false;
+      }
+      if (entry.insights.overall_score > filters.maxOverallScore) {
+        return false;
+      }
+      if (entry.insights.farming_probability > maxFarmProbability) {
+        return false;
+      }
+      if (filters.tag !== 'all' && entry.insights.behavior_tag !== filters.tag) {
+        return false;
+      }
+
       return true;
     });
   }, [data, filters, source]);
+
+  const sortedResults = useMemo<
+    CampaignRunResponse['results'] | CampaignInsightsResponse['results']
+  >(() => {
+    if (!showInsights) {
+      return filteredResults;
+    }
+
+    const sorted = [...(filteredResults as WalletRowWithInsights[])];
+    sorted.sort((a, b) => {
+      const walletCompare = a.wallet.localeCompare(b.wallet);
+      let diff = 0;
+
+      switch (filters.sortBy) {
+        case 'score_asc':
+          diff = a.insights.overall_score - b.insights.overall_score;
+          break;
+        case 'score_desc':
+          diff = b.insights.overall_score - a.insights.overall_score;
+          break;
+        case 'farm_asc':
+          diff = a.insights.farming_probability - b.insights.farming_probability;
+          break;
+        case 'farm_desc':
+          diff = b.insights.farming_probability - a.insights.farming_probability;
+          break;
+        case 'tx_asc':
+          diff = a.output.usage_summary.tx_count - b.output.usage_summary.tx_count;
+          break;
+        case 'tx_desc':
+          diff = b.output.usage_summary.tx_count - a.output.usage_summary.tx_count;
+          break;
+        default:
+          diff = 0;
+      }
+
+      if (diff === 0) {
+        return walletCompare;
+      }
+      return diff;
+    });
+
+    return sorted;
+  }, [filteredResults, filters.sortBy, showInsights]);
+
+  const sortLabel = useMemo(() => {
+    if (!showInsights) {
+      return null;
+    }
+    switch (filters.sortBy) {
+      case 'score_asc':
+        return 'Score (low to high)';
+      case 'score_desc':
+        return 'Score (high to low)';
+      case 'farm_asc':
+        return 'Farm% (low to high)';
+      case 'farm_desc':
+        return 'Farm% (high to low)';
+      case 'tx_asc':
+        return 'Tx count (low to high)';
+      case 'tx_desc':
+        return 'Tx count (high to low)';
+      default:
+        return null;
+    }
+  }, [filters.sortBy, showInsights]);
 
   const total = data?.summary.total ?? 0;
   const sourceLabel = source ?? 'unknown';
@@ -327,20 +414,33 @@ const DemoCampaignPage = () => {
 
       {data && !loading && total > 0 && source && (
         <>
-          <Filters value={filters} onChange={setFilters} disabled={loading} />
+          <Filters
+            value={filters}
+            onChange={setFilters}
+            disabled={loading}
+            insightsEnabled={showInsights}
+          />
 
-          <div className="flex items-center justify-between text-sm text-slate-400">
-            <span>
-              Showing {filteredResults.length} of {total} wallets
-            </span>
+          <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-400">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm font-semibold text-slate-200">Wallets</span>
+              <span>
+                Showing {sortedResults.length} of {total} wallets
+              </span>
+            </div>
+            {sortLabel && (
+              <span className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                Sort: {sortLabel}
+              </span>
+            )}
           </div>
 
-          {filteredResults.length === 0 ? (
+          {sortedResults.length === 0 ? (
             <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-sm text-slate-300">
               No wallets match the current filters.
             </div>
           ) : (
-            <WalletTable results={filteredResults} source={source} />
+            <WalletTable results={sortedResults} source={source} />
           )}
         </>
       )}

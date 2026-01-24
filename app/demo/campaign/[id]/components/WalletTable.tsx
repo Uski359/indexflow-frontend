@@ -3,6 +3,7 @@
 import { useState } from 'react';
 
 import type { CampaignRunItem, WalletRowWithInsights } from '@/lib/types';
+import { farmRiskClass, scoreClass } from '@/lib/uiFormat';
 
 type DataSource = 'commentary' | 'insights' | 'run';
 
@@ -88,6 +89,9 @@ const WalletTable = ({ results, source }: WalletTableProps) => {
               const verified = entry.output.verified_usage;
               const insightsEntry = isInsightsRow(entry) ? entry : null;
               const rowClickable = showInsights && insightsEntry;
+              const farmPercent = insightsEntry
+                ? Math.round(insightsEntry.insights.farming_probability * 100)
+                : 0;
 
               return (
                 <tr
@@ -125,12 +129,24 @@ const WalletTable = ({ results, source }: WalletTableProps) => {
                   </td>
                   {showInsights && insightsEntry && (
                     <td className="px-4 py-3 text-slate-200">
-                      {formatNumber(insightsEntry.insights.overall_score)}
+                      <span
+                        className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${scoreClass(
+                          insightsEntry.insights.overall_score
+                        )}`}
+                      >
+                        {formatNumber(insightsEntry.insights.overall_score)}
+                      </span>
                     </td>
                   )}
                   {showInsights && insightsEntry && (
                     <td className="px-4 py-3 text-slate-200">
-                      {formatPercent(insightsEntry.insights.farming_probability)}
+                      <span
+                        className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${farmRiskClass(
+                          farmPercent
+                        )}`}
+                      >
+                        {formatPercent(insightsEntry.insights.farming_probability)}
+                      </span>
                     </td>
                   )}
                   {showInsights && insightsEntry && (
@@ -318,14 +334,26 @@ const WalletTable = ({ results, source }: WalletTableProps) => {
             <div className="mt-4 grid gap-4 text-sm sm:grid-cols-3">
               <div className="rounded-xl border border-white/10 bg-white/5 p-4">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Score</p>
-                <p className="mt-2 text-lg font-semibold">
-                  {formatNumber(selected.insights.overall_score)}
+                <p className="mt-2">
+                  <span
+                    className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${scoreClass(
+                      selected.insights.overall_score
+                    )}`}
+                  >
+                    {formatNumber(selected.insights.overall_score)}
+                  </span>
                 </p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-4">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Farm %</p>
-                <p className="mt-2 text-lg font-semibold">
-                  {formatPercent(selected.insights.farming_probability)}
+                <p className="mt-2">
+                  <span
+                    className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${farmRiskClass(
+                      Math.round(selected.insights.farming_probability * 100)
+                    )}`}
+                  >
+                    {formatPercent(selected.insights.farming_probability)}
+                  </span>
                 </p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-4">
