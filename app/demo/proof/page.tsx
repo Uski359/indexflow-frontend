@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 
 import { getDemoApiBaseUrl } from '@/lib/api';
 import { exportProofCsv } from '@/lib/proofCsv';
@@ -13,6 +14,11 @@ import {
   runProofEvaluation
 } from '@/lib/proofClient';
 import type { ProofSummary, ProofWalletRow, ProofWindowType } from '@/lib/proofTypes';
+import {
+  parseProofState,
+  serializeProofState,
+  type CriteriaSetId
+} from '@/lib/proofUrlState';
 
 import ProofFilters, { type ProofFilterState } from './components/ProofFilters';
 import ProofKpis from './components/ProofKpis';
@@ -43,8 +49,6 @@ const fallbackSampleWallets = [
   '0x0000000000000000000000000000000000000013',
   '0x0000000000000000000000000000000000000014'
 ] as const;
-
-type CriteriaSetId = 'default' | 'active' | 'strict' | 'anti_farm';
 
 const criteriaPresets: Record<
   CriteriaSetId,
@@ -90,9 +94,6 @@ const criteriaSetIds = Object.keys(criteriaPresets) as CriteriaSetId[];
 const isCriteriaSetId = (value: string): value is CriteriaSetId => {
   return criteriaSetIds.includes(value as CriteriaSetId);
 };
-const isProofWindowType = (value: string): value is ProofWindowType => {
-  return value === 'last_7_days' || value === 'last_30_days';
-};
 
 const defaultFilters: ProofFilterState = {
   verified: 'all',
@@ -116,8 +117,11 @@ const sortLabelMap: Record<ProofFilterState['sortBy'], string> = {
   wallet_asc: 'Wallet (A to Z)'
 };
 
-const DemoProofPage = () => {
+const DemoProofPageInner = () => {
   const baseUrl = getDemoApiBaseUrl();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [inputValue, setInputValue] = useState('');
   const [windowType, setWindowType] = useState<ProofWindowType>('last_30_days');
   const [criteriaSetId, setCriteriaSetId] = useState<CriteriaSetId>('default');
@@ -128,7 +132,16 @@ const DemoProofPage = () => {
   const [sampleLoading, setSampleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState({ processed: 0, total: 0 });
+  const [isHydrated, setIsHydrated] = useState(false);
+  const [shareStatus, setShareStatus] = useState<string | null>(null);
+  const [shareWarning, setShareWarning] = useState<string | null>(null);
+  const [proofCopyStatus, setProofCopyStatus] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const initializedRef = useRef(false);
+  const autoRunRef = useRef(false);
+  const hasAutoRunRef = useRef(false);
+  const skipNextPresetSyncRef = useRef(false);
+  const lastSearchRef = useRef<string>('');
 
   const parsedWallets = useMemo(
     () => normalizeWalletInput(inputValue),
@@ -157,21 +170,42 @@ const DemoProofPage = () => {
   }, [insightsEnabled]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (initializedRef.current) {
       return;
     }
-    const params = new URLSearchParams(window.location.search);
-    const windowParam = params.get('window');
-    if (windowParam && isProofWindowType(windowParam)) {
-      setWindowType(windowParam);
+    initializedRef.current = true;
+
+    const parsed = parseProofState(searchParams);
+    const hasFilterOverride = Boolean(parsed.filters);
+
+    if (parsed.walletsRaw) {
+      setInputValue(parsed.walletsRaw);
     }
-    const criteriaParam = params.get('criteria_set');
-    if (criteriaParam && isCriteriaSetId(criteriaParam)) {
-      setCriteriaSetId(criteriaParam);
+    if (parsed.windowType) {
+      setWindowType(parsed.windowType);
     }
-  }, []);
+    if (parsed.criteriaSetId && isCriteriaSetId(parsed.criteriaSetId)) {
+      if (hasFilterOverride) {
+        skipNextPresetSyncRef.current = true;
+      }
+      setCriteriaSetId(parsed.criteriaSetId);
+    }
+    if (parsed.filters) {
+      skipNextPresetSyncRef.current = true;
+      setFilters({ ...defaultFilters, ...parsed.filters });
+    }
+    if (parsed.autoRun) {
+      autoRunRef.current = true;
+    }
+
+    setTimeout(() => setIsHydrated(true), 0);
+  }, [searchParams]);
 
   useEffect(() => {
+    if (skipNextPresetSyncRef.current) {
+      skipNextPresetSyncRef.current = false;
+      return;
+    }
     const preset = criteriaPresets[criteriaSetId];
     if (!preset) {
       return;
@@ -184,16 +218,87 @@ const DemoProofPage = () => {
   }, [criteriaSetId]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (!isHydrated) {
       return;
     }
-    const params = new URLSearchParams(window.location.search);
-    params.set('window', windowType);
-    params.set('criteria_set', criteriaSetId);
-    const next = params.toString();
-    const nextUrl = next ? `${window.location.pathname}?${next}` : window.location.pathname;
-    window.history.replaceState(null, '', nextUrl);
-  }, [criteriaSetId, windowType]);
+
+    const rawTooLong = inputValue.length > 1500 && parsedWallets.valid.length > 0;
+    setShareWarning(
+      rawTooLong ? 'Wallet list is long; share link uses normalized wallets.' : null
+    );
+
+    const params = serializeProofState({
+      walletsRaw: inputValue,
+      normalizedWallets: parsedWallets.valid,
+      windowType,
+      criteriaSetId,
+      filters
+    });
+
+    const nextSearch = params.toString();
+    const currentSearch =
+      typeof window !== 'undefined'
+        ? window.location.search.replace(/^\?/, '')
+        : searchParams.toString();
+
+    if (nextSearch === currentSearch || nextSearch === lastSearchRef.current) {
+      return;
+    }
+
+    lastSearchRef.current = nextSearch;
+    const nextUrl = nextSearch ? `${pathname}?${nextSearch}` : pathname;
+    router.replace(nextUrl, { scroll: false });
+  }, [criteriaSetId, filters, isHydrated, pathname, router, searchParams, windowType]);
+
+  useEffect(() => {
+    if (!isHydrated) {
+      return;
+    }
+    const timeout = setTimeout(() => {
+      const rawTooLong = inputValue.length > 1500 && parsedWallets.valid.length > 0;
+      setShareWarning(
+        rawTooLong ? 'Wallet list is long; share link uses normalized wallets.' : null
+      );
+
+      const params = serializeProofState({
+        walletsRaw: inputValue,
+        normalizedWallets: parsedWallets.valid,
+        windowType,
+        criteriaSetId,
+        filters
+      });
+
+      const nextSearch = params.toString();
+      const currentSearch =
+        typeof window !== 'undefined'
+          ? window.location.search.replace(/^\?/, '')
+          : searchParams.toString();
+
+      if (nextSearch === currentSearch || nextSearch === lastSearchRef.current) {
+        return;
+      }
+
+      lastSearchRef.current = nextSearch;
+      const nextUrl = nextSearch ? `${pathname}?${nextSearch}` : pathname;
+      router.replace(nextUrl, { scroll: false });
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [criteriaSetId, filters, inputValue, isHydrated, pathname, router, searchParams, windowType, parsedWallets.valid]);
+
+  useEffect(() => {
+    if (!isHydrated || hasAutoRunRef.current || !autoRunRef.current) {
+      return;
+    }
+    if (!baseUrl) {
+      return;
+    }
+    if (!parsedWallets.valid.length) {
+      return;
+    }
+    hasAutoRunRef.current = true;
+    void handleRun();
+  }, [baseUrl, criteriaSetId, isHydrated, parsedWallets.valid.length, windowType]);
 
   const filteredResults = useMemo<ProofWalletRow[]>(() => {
     return rows.filter((entry) => {
@@ -341,13 +446,50 @@ const DemoProofPage = () => {
     [filteredResults]
   );
 
-  const normalizeAndSet = (rawInput: string) => {
+  const syncUrlWith = (walletsRaw: string, normalizedWallets: string[]) => {
+    if (!isHydrated) {
+      return;
+    }
+
+    const rawTooLong = walletsRaw.length > 1500 && normalizedWallets.length > 0;
+    setShareWarning(
+      rawTooLong ? 'Wallet list is long; share link uses normalized wallets.' : null
+    );
+
+    const params = serializeProofState({
+      walletsRaw,
+      normalizedWallets,
+      windowType,
+      criteriaSetId,
+      filters
+    });
+
+    const nextSearch = params.toString();
+    const currentSearch =
+      typeof window !== 'undefined'
+        ? window.location.search.replace(/^\?/, '')
+        : searchParams.toString();
+
+    if (nextSearch === currentSearch || nextSearch === lastSearchRef.current) {
+      return;
+    }
+
+    lastSearchRef.current = nextSearch;
+    const nextUrl = nextSearch ? `${pathname}?${nextSearch}` : pathname;
+    router.replace(nextUrl, { scroll: false });
+  };
+
+  const normalizeAndSet = (rawInput: string, syncNow = false) => {
     const normalized = normalizeWalletInput(rawInput);
-    setInputValue(normalized.valid.join('\n'));
+    const nextValue = normalized.valid.join('\n');
+    setInputValue(nextValue);
+    if (syncNow) {
+      syncUrlWith(nextValue, normalized.valid);
+    }
   };
 
   const handleNormalize = () => {
-    normalizeAndSet(inputValue);
+    normalizeAndSet(inputValue, true);
   };
 
   const handlePasteSample = async () => {
@@ -356,9 +498,9 @@ const DemoProofPage = () => {
 
     try {
       const wallets = await fetchMockWallets(campaignId, 20);
-      normalizeAndSet(wallets.join('\n'));
+      normalizeAndSet(wallets.join('\n'), true);
     } catch {
-      normalizeAndSet(fallbackSampleWallets.join('\n'));
+      normalizeAndSet(fallbackSampleWallets.join('\n'), true);
     } finally {
       setSampleLoading(false);
     }
@@ -446,6 +588,74 @@ const DemoProofPage = () => {
       windowType,
       criteriaSetId
     });
+  };
+  const handleCopyShareLink = async () => {
+    if (typeof window === 'undefined' || !navigator?.clipboard?.writeText) {
+      return;
+    }
+
+    const rawTooLong = inputValue.length > 1500 && parsedWallets.valid.length > 0;
+    setShareWarning(
+      rawTooLong ? 'Wallet list is long; share link uses normalized wallets.' : null
+    );
+
+    const params = serializeProofState({
+      walletsRaw: inputValue,
+      normalizedWallets: parsedWallets.valid,
+      windowType,
+      criteriaSetId,
+      filters
+    });
+
+    const nextSearch = params.toString();
+    const nextUrl = nextSearch ? `${pathname}?${nextSearch}` : pathname;
+    router.replace(nextUrl, { scroll: false });
+
+    const url = nextSearch
+      ? `${window.location.origin}${pathname}?${nextSearch}`
+      : `${window.location.origin}${pathname}`;
+
+    try {
+      await navigator.clipboard.writeText(url);
+      setShareStatus('Copied share link.');
+    } catch {
+      setShareStatus('Failed to copy link.');
+    }
+
+    setTimeout(() => setShareStatus(null), 1500);
+  };
+  const handleCopyProofs = async () => {
+    if (!navigator?.clipboard?.writeText) {
+      return;
+    }
+    if (!sortedResults.length) {
+      setProofCopyStatus('No proofs to copy.');
+      setTimeout(() => setProofCopyStatus(null), 1500);
+      return;
+    }
+
+    let proofCount = 0;
+    let missingCount = 0;
+    const lines = sortedResults.map((row) => {
+      const proofHash = row.output?.proof.canonical_hash;
+      if (proofHash) {
+        proofCount += 1;
+        return `${row.wallet}  ${proofHash}`;
+      }
+      missingCount += 1;
+      return `${row.wallet}  MISSING_PROOF`;
+    });
+
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'));
+      const suffix = missingCount ? ` (${missingCount} missing)` : '';
+      const label = proofCount ? `Copied ${proofCount} proofs${suffix}.` : 'No proofs to copy.';
+      setProofCopyStatus(label);
+    } catch {
+      setProofCopyStatus('Failed to copy proofs.');
+    }
+
+    setTimeout(() => setProofCopyStatus(null), 1500);
   };
 
   return (
@@ -543,7 +753,19 @@ const DemoProofPage = () => {
                   Cancel
                 </button>
               )}
+              <button
+                type="button"
+                onClick={handleCopyShareLink}
+                className="rounded-full border border-white/10 px-6 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-300 hover:text-white"
+              >
+                Copy share link
+              </button>
             </div>
+            {(shareStatus || shareWarning) && (
+              <div className="text-xs text-slate-400">
+                {shareStatus ?? shareWarning}
+              </div>
+            )}
           </div>
         </div>
 
@@ -590,11 +812,21 @@ const DemoProofPage = () => {
                 </span>
                 <button
                   type="button"
+                  onClick={handleCopyProofs}
+                  className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-300 hover:text-white"
+                >
+                  Copy proofs
+                </button>
+                <button
+                  type="button"
                   onClick={handleExportCsv}
                   className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-300 hover:text-white"
                 >
                   Export CSV
                 </button>
+                {proofCopyStatus && (
+                  <span className="text-xs text-slate-400">{proofCopyStatus}</span>
+                )}
               </div>
             )}
           </div>
@@ -619,6 +851,22 @@ const DemoProofPage = () => {
         insightsEnabled={insightsEnabled}
       />
     </div>
+  );
+};
+
+const DemoProofPage = () => {
+  return (
+    <Suspense
+      fallback={
+        <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-10">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-sm text-slate-300">
+            Loading proof demo...
+          </div>
+        </div>
+      }
+    >
+      <DemoProofPageInner />
+    </Suspense>
   );
 };
 
