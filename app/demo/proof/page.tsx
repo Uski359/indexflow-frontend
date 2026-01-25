@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { getDemoApiBaseUrl } from '@/lib/api';
+import { exportProofCsv } from '@/lib/proofCsv';
 import {
   buildUsageWindow,
   fetchMockWallets,
@@ -20,6 +21,78 @@ import WalletDetailModal from './components/WalletDetailModal';
 import WalletInput from './components/WalletInput';
 
 const campaignId = 'airdrop_v1';
+const fallbackSampleWallets = [
+  '0x0000000000000000000000000000000000000001',
+  '0x0000000000000000000000000000000000000002',
+  '0x0000000000000000000000000000000000000003',
+  '0x0000000000000000000000000000000000000004',
+  '0x0000000000000000000000000000000000000005',
+  '0x0000000000000000000000000000000000000006',
+  '0x0000000000000000000000000000000000000007',
+  '0x0000000000000000000000000000000000000008',
+  '0x0000000000000000000000000000000000000009',
+  '0x000000000000000000000000000000000000000a',
+  '0x000000000000000000000000000000000000000b',
+  '0x000000000000000000000000000000000000000c',
+  '0x000000000000000000000000000000000000000d',
+  '0x000000000000000000000000000000000000000e',
+  '0x000000000000000000000000000000000000000f',
+  '0x0000000000000000000000000000000000000010',
+  '0x0000000000000000000000000000000000000011',
+  '0x0000000000000000000000000000000000000012',
+  '0x0000000000000000000000000000000000000013',
+  '0x0000000000000000000000000000000000000014'
+] as const;
+
+type CriteriaSetId = 'default' | 'active' | 'strict' | 'anti_farm';
+
+const criteriaPresets: Record<
+  CriteriaSetId,
+  { label: string; filters: Partial<ProofFilterState> }
+> = {
+  default: {
+    label: 'default',
+    filters: {
+      minTxCount: 0,
+      minDaysActive: 0,
+      minUniqueContracts: 0
+    }
+  },
+  active: {
+    label: 'active',
+    filters: {
+      minTxCount: 10,
+      minDaysActive: 7,
+      minUniqueContracts: 3
+    }
+  },
+  strict: {
+    label: 'strict',
+    filters: {
+      minTxCount: 25,
+      minDaysActive: 14,
+      minUniqueContracts: 7
+    }
+  },
+  anti_farm: {
+    label: 'anti_farm',
+    filters: {
+      minTxCount: 15,
+      minDaysActive: 10,
+      minUniqueContracts: 5,
+      maxFarmPercent: 55,
+      minScore: 40
+    }
+  }
+};
+
+const criteriaSetIds = Object.keys(criteriaPresets) as CriteriaSetId[];
+const isCriteriaSetId = (value: string): value is CriteriaSetId => {
+  return criteriaSetIds.includes(value as CriteriaSetId);
+};
+const isProofWindowType = (value: string): value is ProofWindowType => {
+  return value === 'last_7_days' || value === 'last_30_days';
+};
 
 const defaultFilters: ProofFilterState = {
   verified: 'all',
@@ -47,7 +120,7 @@ const DemoProofPage = () => {
   const baseUrl = getDemoApiBaseUrl();
   const [inputValue, setInputValue] = useState('');
   const [windowType, setWindowType] = useState<ProofWindowType>('last_30_days');
-  const criteriaSet = 'default';
+  const [criteriaSetId, setCriteriaSetId] = useState<CriteriaSetId>('default');
   const [filters, setFilters] = useState<ProofFilterState>(defaultFilters);
   const [rows, setRows] = useState<ProofWalletRow[]>([]);
   const [selected, setSelected] = useState<ProofWalletRow | null>(null);
@@ -82,6 +155,45 @@ const DemoProofPage = () => {
       };
     });
   }, [insightsEnabled]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const windowParam = params.get('window');
+    if (windowParam && isProofWindowType(windowParam)) {
+      setWindowType(windowParam);
+    }
+    const criteriaParam = params.get('criteria_set');
+    if (criteriaParam && isCriteriaSetId(criteriaParam)) {
+      setCriteriaSetId(criteriaParam);
+    }
+  }, []);
+
+  useEffect(() => {
+    const preset = criteriaPresets[criteriaSetId];
+    if (!preset) {
+      return;
+    }
+    setFilters((prev) => ({
+      ...defaultFilters,
+      sortBy: prev.sortBy,
+      ...preset.filters
+    }));
+  }, [criteriaSetId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    params.set('window', windowType);
+    params.set('criteria_set', criteriaSetId);
+    const next = params.toString();
+    const nextUrl = next ? `${window.location.pathname}?${next}` : window.location.pathname;
+    window.history.replaceState(null, '', nextUrl);
+  }, [criteriaSetId, windowType]);
 
   const filteredResults = useMemo<ProofWalletRow[]>(() => {
     return rows.filter((entry) => {
@@ -229,9 +341,13 @@ const DemoProofPage = () => {
     [filteredResults]
   );
 
-  const handleNormalize = () => {
-    const normalized = normalizeWalletInput(inputValue);
+  const normalizeAndSet = (rawInput: string) => {
+    const normalized = normalizeWalletInput(rawInput);
     setInputValue(normalized.valid.join('\n'));
+  };
+
+  const handleNormalize = () => {
+    normalizeAndSet(inputValue);
   };
 
   const handlePasteSample = async () => {
@@ -240,10 +356,9 @@ const DemoProofPage = () => {
 
     try {
       const wallets = await fetchMockWallets(campaignId, 20);
-      setInputValue(wallets.join('\n'));
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Unexpected error.';
-      setError(message);
+      normalizeAndSet(wallets.join('\n'));
+    } catch {
+      normalizeAndSet(fallbackSampleWallets.join('\n'));
     } finally {
       setSampleLoading(false);
     }
@@ -293,9 +408,15 @@ const DemoProofPage = () => {
         wallets: normalized.valid,
         campaignId,
         window: buildUsageWindow(windowType),
+        criteriaSetId,
         signal: controller.signal,
-        onProgress: (processed) =>
-          setProgress((prev) => ({ ...prev, processed }))
+        onProgress: (nextProgress) => {
+          setProgress({
+            processed: nextProgress.processed,
+            total: nextProgress.total
+          });
+          setRows(nextProgress.rows);
+        }
       });
 
       if (!controller.signal.aborted) {
@@ -315,6 +436,17 @@ const DemoProofPage = () => {
   };
 
   const hasResults = rows.length > 0;
+  const progressPercent = progress.total
+    ? Math.min(100, Math.round((progress.processed / progress.total) * 100))
+    : 0;
+  const handleExportCsv = () => {
+    exportProofCsv({
+      rows: sortedResults,
+      campaignId,
+      windowType,
+      criteriaSetId
+    });
+  };
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-10">
@@ -371,38 +503,61 @@ const DemoProofPage = () => {
           <label className="flex flex-col gap-2 text-sm text-slate-300">
             Criteria set
             <select
-              value={criteriaSet}
-              disabled
+              value={criteriaSetId}
+              onChange={(event) => {
+                const next = event.target.value;
+                if (isCriteriaSetId(next)) {
+                  setCriteriaSetId(next);
+                }
+              }}
+              disabled={loading}
               className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white"
             >
-              <option value="default">default</option>
+              {criteriaSetIds.map((id) => (
+                <option key={id} value={id}>
+                  {criteriaPresets[id].label}
+                </option>
+              ))}
             </select>
+            <span className="text-xs text-slate-500">
+              Presets are UI-side filters for demo; verification proof remains deterministic.
+            </span>
           </label>
 
           <div className="flex flex-col justify-end gap-2">
-            <button
-              type="button"
-              onClick={handleRun}
-              disabled={loading || parsedWallets.valid.length === 0 || !baseUrl}
-              className="inline-flex items-center justify-center rounded-full bg-white px-6 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-black transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:bg-white/40 disabled:text-slate-500"
-            >
-              {loading ? 'Running...' : 'Run'}
-            </button>
-            {loading && (
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={handleCancel}
-                className="rounded-full border border-white/10 px-6 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-300 hover:text-white"
+                onClick={handleRun}
+                disabled={loading || parsedWallets.valid.length === 0 || !baseUrl}
+                className="inline-flex items-center justify-center rounded-full bg-white px-6 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-black transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:bg-white/40 disabled:text-slate-500"
               >
-                Cancel
+                {loading ? 'Running...' : 'Run'}
               </button>
-            )}
+              {loading && (
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="rounded-full border border-white/10 px-6 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-300 hover:text-white"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
         {loading && (
-          <div className="mt-4 text-sm text-slate-300">
-            Processed {progress.processed} / {progress.total}
+          <div className="mt-4 space-y-2">
+            <div className="text-sm text-slate-300">
+              Processed {progress.processed} / {progress.total}
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full rounded-full bg-emerald-400/80 transition-all"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
           </div>
         )}
       </div>
@@ -429,9 +584,18 @@ const DemoProofPage = () => {
               )}
             </div>
             {sortedResults.length > 0 && (
-              <span className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                Sort: {sortLabelMap[filters.sortBy]}
-              </span>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                  Sort: {sortLabelMap[filters.sortBy]}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleExportCsv}
+                  className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-300 hover:text-white"
+                >
+                  Export CSV
+                </button>
+              </div>
             )}
           </div>
 

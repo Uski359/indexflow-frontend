@@ -66,10 +66,17 @@ export type ProofRunResult = {
   source: ProofDataSource;
 };
 
+export type ProofRunProgress = {
+  processed: number;
+  total: number;
+  rows: ProofWalletRow[];
+};
+
 export type ProofRunOptions = {
   wallets: string[];
   campaignId: string;
   window: UsageWindow;
+  criteriaSetId?: string;
   signal?: AbortSignal;
-  onProgress?: (processed: number) => void;
+  onProgress?: (progress: ProofRunProgress) => void;
 };

@@ -70,7 +70,7 @@ const WalletDetailModal = ({ row, onClose, insightsEnabled }: WalletDetailModalP
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <span
                 className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
-                  row.output.verified_usage
+                  output.verified_usage
                     ? 'bg-emerald-500/20 text-emerald-200'
                     : 'bg-rose-500/20 text-rose-200'
                 }`}
@@ -220,7 +220,7 @@ const WalletDetailModal = ({ row, onClose, insightsEnabled }: WalletDetailModalP
               <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Proof hash</p>
               <p
                 className="mt-2 font-mono text-sm text-slate-200"
-                title={row.output.proof.canonical_hash}
+                title={output.proof.canonical_hash}
               >
                 {shortenHash(output.proof.canonical_hash)}
               </p>
