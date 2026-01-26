@@ -27,3 +27,14 @@ It is **not** a production UI.
 
 - Umbrella repo: https://github.com/Uski359/indexflow
 - Backend services: https://github.com/Uski359/indexflow-backend
+
+## Demo Pages
+
+- `/demo` — Campaign dashboard demo
+- `/demo/proof` — Multi-wallet proof-of-usage demo
+
+The Proof page supports:
+- Multi-wallet input
+- Deterministic proof hashes
+- Shareable demo links
+- CSV export and copyable proofs
