@@ -38,3 +38,4 @@ The Proof page supports:
 - Deterministic proof hashes
 - Shareable demo links
 - CSV export and copyable proofs
+<img width="913" height="869" alt="image" src="https://github.com/user-attachments/assets/a1fca22f-19d1-4543-b1ec-aa831333c91b" />
