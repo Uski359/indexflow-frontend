@@ -44,10 +44,9 @@ The Proof page supports:
 Below is the campaign demo view showing deterministic usage verification,
 insights, and non-proof AI commentary.
 
-![IndexFlow Demo Dashboard](./docs/demo-campaign.png)
+<img width="913" height="869" alt="image" src="https://github.com/user-attachments/assets/a1fca22f-19d1-4543-b1ec-aa831333c91b" />
 
 The demo highlights:
 - Verified vs non-verified wallets
 - Deterministic scoring and farming probability
 - Clear separation between proof, insights, and commentary
-<img width="913" height="869" alt="image" src="https://github.com/user-attachments/assets/a1fca22f-19d1-4543-b1ec-aa831333c91b" />
