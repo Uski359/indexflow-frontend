@@ -56,12 +56,12 @@ const fallbackSampleWallets = [
   '0x000000000000000000000000000000000000000f',
   '0x0000000000000000000000000000000000000010',
   '0x0000000000000000000000000000000000000011',
+  'etherium.eth',
   'vitalik.eth',
-  'ens.eth',
-  'unregistered-example.eth'
+  'uniswap.eth'
 ] as const;
 
-const sampleEnsNames = ['vitalik.eth', 'ens.eth', 'unregistered-example.eth'] as const;
+const sampleEnsNames = ['etherium.eth', 'vitalik.eth', 'uniswap.eth'] as const;
 
 const injectEnsSamples = (wallets: string[], limit = 20) => {
   const combined = [...wallets];
