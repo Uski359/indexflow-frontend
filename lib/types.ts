@@ -57,6 +57,8 @@ export type CommentaryV1 = {
 
 export type WalletRowWithInsights = {
   wallet: string;
+  display_name?: string | null;
+  input_source?: 'ens' | 'address';
   output: CoreOutputV1;
   insights: InsightV1;
   cached_core: boolean;
@@ -67,6 +69,8 @@ export type WalletRowWithInsights = {
 
 export type CampaignRunItem = {
   wallet: string;
+  display_name?: string | null;
+  input_source?: 'ens' | 'address';
   output: CoreOutputV1;
   cached: boolean;
 };

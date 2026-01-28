@@ -48,18 +48,18 @@ const sourceLabels: Record<ProofWalletRow['source'], string> = {
 };
 
 const ProofTable = ({ results, insightsEnabled, onSelect }: ProofTableProps) => {
-  const [copiedWallet, setCopiedWallet] = useState<string | null>(null);
+  const [copiedValue, setCopiedValue] = useState<string | null>(null);
 
-  const handleCopy = async (wallet: string) => {
+  const handleCopy = async (value: string) => {
     if (!navigator?.clipboard?.writeText) {
       return;
     }
     try {
-      await navigator.clipboard.writeText(wallet);
-      setCopiedWallet(wallet);
-      setTimeout(() => setCopiedWallet(null), 1500);
+      await navigator.clipboard.writeText(value);
+      setCopiedValue(value);
+      setTimeout(() => setCopiedValue(null), 1500);
     } catch {
-      setCopiedWallet(null);
+      setCopiedValue(null);
     }
   };
 
@@ -87,6 +87,7 @@ const ProofTable = ({ results, insightsEnabled, onSelect }: ProofTableProps) => 
               Boolean(entry.commentary) || entry.cached_commentary !== undefined;
             const farmPercent = Math.round((entry.insights?.farming_probability ?? 0) * 100);
             const hasError = Boolean(entry.error) || !entry.output;
+            const displayName = entry.display_name?.trim();
 
             return (
               <tr
@@ -100,19 +101,58 @@ const ProofTable = ({ results, insightsEnabled, onSelect }: ProofTableProps) => 
               >
                 <td className="px-4 py-3 text-slate-100" title={entry.wallet}>
                   <div className="flex flex-col gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span>{shortenWallet(entry.wallet)}</span>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void handleCopy(entry.wallet);
-                        }}
-                        className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-300 hover:text-white"
-                      >
-                        {copiedWallet === entry.wallet ? 'Copied' : 'Copy'}
-                      </button>
-                    </div>
+                    {displayName ? (
+                      <div className="flex flex-col gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span>{displayName}</span>
+                        <span className="rounded-full border border-emerald-400/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-200">
+                          ENS
+                        </span>
+                        {entry.ens_cached && (
+                          <span className="rounded-full border border-sky-400/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-200">
+                            Cached
+                          </span>
+                        )}
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleCopy(displayName);
+                            }}
+                            className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-300 hover:text-white"
+                          >
+                            {copiedValue === displayName ? 'Copied' : 'Copy name'}
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                          <span>{shortenWallet(entry.wallet)}</span>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleCopy(entry.wallet);
+                            }}
+                            className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-300 hover:text-white"
+                          >
+                            {copiedValue === entry.wallet ? 'Copied' : 'Copy address'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span>{shortenWallet(entry.wallet)}</span>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleCopy(entry.wallet);
+                          }}
+                          className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-300 hover:text-white"
+                        >
+                          {copiedValue === entry.wallet ? 'Copied' : 'Copy'}
+                        </button>
+                      </div>
+                    )}
                     <span
                       className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${sourceStyles[entry.source]}`}
                     >

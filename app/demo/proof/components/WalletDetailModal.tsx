@@ -57,6 +57,7 @@ const WalletDetailModal = ({ row, onClose, insightsEnabled }: WalletDetailModalP
 
   const criteria = output.criteria;
   const params = criteria?.params;
+  const displayName = row.display_name?.trim();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
@@ -65,9 +66,14 @@ const WalletDetailModal = ({ row, onClose, insightsEnabled }: WalletDetailModalP
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Wallet</p>
             <p className="mt-2 text-lg font-semibold" title={row.wallet}>
-              {row.wallet}
+              {displayName ? `${displayName} (${row.wallet})` : row.wallet}
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
+              {displayName && (
+                <span className="inline-flex items-center rounded-full border border-emerald-400/30 px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200">
+                  ENS
+                </span>
+              )}
               <span
                 className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
                   output.verified_usage

@@ -4,16 +4,27 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 
-import { getDemoApiBaseUrl } from '@/lib/api';
+import { demoApiFetch, getDemoApiBaseUrl } from '@/lib/api';
+import {
+  buildEvaluationWallets,
+  normalizeWalletInputs,
+  resolveEnsBatch,
+  type EnsBatchResult,
+  type EvaluationWalletGateResult
+} from '@/lib/ens';
 import { exportProofCsv } from '@/lib/proofCsv';
 import {
   buildUsageWindow,
   fetchMockWallets,
   isAbortError,
-  normalizeWalletInput,
   runProofEvaluation
 } from '@/lib/proofClient';
-import type { ProofSummary, ProofWalletRow, ProofWindowType } from '@/lib/proofTypes';
+import type {
+  ProofEvaluateResponse,
+  ProofSummary,
+  ProofWalletRow,
+  ProofWindowType
+} from '@/lib/proofTypes';
 import {
   parseProofState,
   serializeProofState,
@@ -45,47 +56,57 @@ const fallbackSampleWallets = [
   '0x000000000000000000000000000000000000000f',
   '0x0000000000000000000000000000000000000010',
   '0x0000000000000000000000000000000000000011',
-  '0x0000000000000000000000000000000000000012',
-  '0x0000000000000000000000000000000000000013',
-  '0x0000000000000000000000000000000000000014'
+  'vitalik.eth',
+  'ens.eth',
+  'unregistered-example.eth'
 ] as const;
+
+const sampleEnsNames = ['vitalik.eth', 'ens.eth', 'unregistered-example.eth'] as const;
+
+const injectEnsSamples = (wallets: string[], limit = 20) => {
+  const combined = [...wallets];
+  sampleEnsNames.forEach((name, index) => {
+    if (combined.length < limit) {
+      combined.push(name);
+      return;
+    }
+    const targetIndex = Math.max(0, combined.length - 1 - index);
+    combined[targetIndex] = name;
+  });
+  return combined.slice(0, limit);
+};
 
 const criteriaPresets: Record<
   CriteriaSetId,
-  { label: string; filters: Partial<ProofFilterState> }
+  { label: string; enabled: boolean; hint?: string; filters: Partial<ProofFilterState> }
 > = {
   default: {
     label: 'default',
+    enabled: true,
     filters: {
       minTxCount: 0,
       minDaysActive: 0,
       minUniqueContracts: 0
     }
   },
-  active: {
-    label: 'active',
+  'airdrop/basic@1': {
+    label: 'basic',
+    enabled: false,
+    hint: 'coming soon',
     filters: {
-      minTxCount: 10,
-      minDaysActive: 7,
-      minUniqueContracts: 3
+      minTxCount: 0,
+      minDaysActive: 0,
+      minUniqueContracts: 0
     }
   },
-  strict: {
+  'airdrop/strict@1': {
     label: 'strict',
+    enabled: false,
+    hint: 'coming soon',
     filters: {
       minTxCount: 25,
       minDaysActive: 14,
       minUniqueContracts: 7
-    }
-  },
-  anti_farm: {
-    label: 'anti_farm',
-    filters: {
-      minTxCount: 15,
-      minDaysActive: 10,
-      minUniqueContracts: 5,
-      maxFarmPercent: 55,
-      minScore: 40
     }
   }
 };
@@ -117,6 +138,12 @@ const sortLabelMap: Record<ProofFilterState['sortBy'], string> = {
   wallet_asc: 'Wallet (A to Z)'
 };
 
+const ensErrorHints: Record<string, string> = {
+  rpc_missing: 'backend mainnet RPC not configured',
+  resolver_error: 'provider error; retry',
+  not_found: 'name not registered / no resolver'
+};
+
 const DemoProofPageInner = () => {
   const baseUrl = getDemoApiBaseUrl();
   const router = useRouter();
@@ -132,21 +159,88 @@ const DemoProofPageInner = () => {
   const [sampleLoading, setSampleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState({ processed: 0, total: 0 });
+  const [ensResolution, setEnsResolution] = useState<EnsBatchResult | null>(null);
+  const [gateInvalids, setGateInvalids] = useState<Array<{ value: string; reason: string }>>([]);
+  const [ensRetrying, setEnsRetrying] = useState(false);
+  const [determinismCheck, setDeterminismCheck] = useState<{
+    status: 'ok' | 'mismatch';
+    address: string;
+    ensName?: string;
+  } | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
   const [shareWarning, setShareWarning] = useState<string | null>(null);
   const [proofCopyStatus, setProofCopyStatus] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const runIdRef = useRef(0);
   const initializedRef = useRef(false);
   const autoRunRef = useRef(false);
   const hasAutoRunRef = useRef(false);
   const skipNextPresetSyncRef = useRef(false);
   const lastSearchRef = useRef<string>('');
+  const isDev = process.env.NODE_ENV !== 'production';
 
   const parsedWallets = useMemo(
-    () => normalizeWalletInput(inputValue),
+    () => normalizeWalletInputs(inputValue),
     [inputValue]
   );
+
+  const safeCriteriaSetId = useMemo(() => {
+    return criteriaPresets[criteriaSetId]?.enabled ? criteriaSetId : 'default';
+  }, [criteriaSetId]);
+
+  const normalizedInputList = useMemo(
+    () =>
+      parsedWallets.inputs
+        .filter((entry) => entry.kind !== 'invalid')
+        .map((entry) => entry.normalized ?? entry.raw),
+    [parsedWallets.inputs]
+  );
+
+  const totalEntries = parsedWallets.inputs.length;
+  const validEntries = parsedWallets.addresses.length + parsedWallets.ensNames.length;
+  const invalidEntries = parsedWallets.invalid.length;
+
+  const ensStats = useMemo(() => {
+    const total = parsedWallets.ensNames.length;
+    if (!ensResolution) {
+      return { total, resolved: 0, unresolved: 0 };
+    }
+    const resolvedCount = Object.values(ensResolution.resolved).filter(
+      (entry) => Boolean(entry.address)
+    ).length;
+    return {
+      total,
+      resolved: resolvedCount,
+      unresolved: ensResolution.unresolved.length
+    };
+  }, [ensResolution, parsedWallets.ensNames.length]);
+
+  const invalidList = useMemo(() => {
+    const entries: Array<{ value: string; reason: string }> = [];
+    const seen = new Set<string>();
+    const addEntry = (value: string, reason: string) => {
+      const key = `${value}:${reason}`;
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      entries.push({ value, reason });
+    };
+
+    parsedWallets.invalid.forEach((value) => addEntry(value, 'invalid_format'));
+    gateInvalids.forEach((entry) => addEntry(entry.value, entry.reason));
+
+    if (ensResolution) {
+      for (const name of ensResolution.unresolved) {
+        addEntry(name, ensResolution.resolved[name]?.error ?? 'not_found');
+      }
+    }
+
+    return entries;
+  }, [ensResolution, parsedWallets.invalid, gateInvalids]);
+
+  const hasUnresolvedEns = Boolean(ensResolution?.unresolved.length);
 
   const insightsEnabled = useMemo(
     () => rows.some((row) => row.source === 'commentary' || row.source === 'insights'),
@@ -202,6 +296,12 @@ const DemoProofPageInner = () => {
   }, [searchParams]);
 
   useEffect(() => {
+    setEnsResolution(null);
+    setGateInvalids([]);
+    setDeterminismCheck(null);
+  }, [inputValue]);
+
+  useEffect(() => {
     if (skipNextPresetSyncRef.current) {
       skipNextPresetSyncRef.current = false;
       return;
@@ -222,16 +322,16 @@ const DemoProofPageInner = () => {
       return;
     }
 
-    const rawTooLong = inputValue.length > 1500 && parsedWallets.valid.length > 0;
+    const rawTooLong = inputValue.length > 1500 && validEntries > 0;
     setShareWarning(
       rawTooLong ? 'Wallet list is long; share link uses normalized wallets.' : null
     );
 
     const params = serializeProofState({
       walletsRaw: inputValue,
-      normalizedWallets: parsedWallets.valid,
+      normalizedWallets: normalizedInputList,
       windowType,
-      criteriaSetId,
+      criteriaSetId: safeCriteriaSetId,
       filters
     });
 
@@ -248,23 +348,23 @@ const DemoProofPageInner = () => {
     lastSearchRef.current = nextSearch;
     const nextUrl = nextSearch ? `${pathname}?${nextSearch}` : pathname;
     router.replace(nextUrl, { scroll: false });
-  }, [criteriaSetId, filters, isHydrated, pathname, router, searchParams, windowType]);
+  }, [filters, isHydrated, pathname, router, searchParams, safeCriteriaSetId, windowType]);
 
   useEffect(() => {
     if (!isHydrated) {
       return;
     }
     const timeout = setTimeout(() => {
-      const rawTooLong = inputValue.length > 1500 && parsedWallets.valid.length > 0;
+      const rawTooLong = inputValue.length > 1500 && validEntries > 0;
       setShareWarning(
         rawTooLong ? 'Wallet list is long; share link uses normalized wallets.' : null
       );
 
       const params = serializeProofState({
         walletsRaw: inputValue,
-        normalizedWallets: parsedWallets.valid,
+        normalizedWallets: normalizedInputList,
         windowType,
-        criteriaSetId,
+        criteriaSetId: safeCriteriaSetId,
         filters
       });
 
@@ -284,7 +384,7 @@ const DemoProofPageInner = () => {
     }, 300);
 
     return () => clearTimeout(timeout);
-  }, [criteriaSetId, filters, inputValue, isHydrated, pathname, router, searchParams, windowType, parsedWallets.valid]);
+  }, [filters, inputValue, isHydrated, pathname, router, searchParams, safeCriteriaSetId, windowType, normalizedInputList, validEntries]);
 
   useEffect(() => {
     if (!isHydrated || hasAutoRunRef.current || !autoRunRef.current) {
@@ -293,12 +393,12 @@ const DemoProofPageInner = () => {
     if (!baseUrl) {
       return;
     }
-    if (!parsedWallets.valid.length) {
+    if (!validEntries) {
       return;
     }
     hasAutoRunRef.current = true;
     void handleRun();
-  }, [baseUrl, criteriaSetId, isHydrated, parsedWallets.valid.length, windowType]);
+  }, [baseUrl, isHydrated, safeCriteriaSetId, validEntries, windowType]);
 
   const filteredResults = useMemo<ProofWalletRow[]>(() => {
     return rows.filter((entry) => {
@@ -460,7 +560,7 @@ const DemoProofPageInner = () => {
       walletsRaw,
       normalizedWallets,
       windowType,
-      criteriaSetId,
+      criteriaSetId: safeCriteriaSetId,
       filters
     });
 
@@ -480,11 +580,14 @@ const DemoProofPageInner = () => {
   };
 
   const normalizeAndSet = (rawInput: string, syncNow = false) => {
-    const normalized = normalizeWalletInput(rawInput);
-    const nextValue = normalized.valid.join('\n');
+    const normalized = normalizeWalletInputs(rawInput);
+    const normalizedList = normalized.inputs
+      .filter((entry) => entry.kind !== 'invalid')
+      .map((entry) => entry.normalized ?? entry.raw);
+    const nextValue = normalizedList.join('\n');
     setInputValue(nextValue);
     if (syncNow) {
-      syncUrlWith(nextValue, normalized.valid);
+      syncUrlWith(nextValue, normalizedList);
     }
   };
 
@@ -498,9 +601,10 @@ const DemoProofPageInner = () => {
 
     try {
       const wallets = await fetchMockWallets(campaignId, 20);
-      normalizeAndSet(wallets.join('\n'), true);
+      const mixed = injectEnsSamples(wallets, 20);
+      normalizeAndSet(mixed.join('\n'), true);
     } catch {
-      normalizeAndSet(fallbackSampleWallets.join('\n'), true);
+      normalizeAndSet(injectEnsSamples([...fallbackSampleWallets], 20).join('\n'), true);
     } finally {
       setSampleLoading(false);
     }
@@ -512,10 +616,93 @@ const DemoProofPageInner = () => {
     setSelected(null);
     setError(null);
     setProgress({ processed: 0, total: 0 });
+    setEnsResolution(null);
+    setGateInvalids([]);
+    setDeterminismCheck(null);
   };
 
   const handleCancel = () => {
     abortRef.current?.abort();
+  };
+
+  const handleRetryUnresolvedEns = async () => {
+    if (!ensResolution?.unresolved.length) {
+      return;
+    }
+
+    setEnsRetrying(true);
+    setError(null);
+    try {
+      const retry = await resolveEnsBatch(ensResolution.unresolved, {
+        concurrency: 5
+      });
+      setEnsResolution((prev) => {
+        if (!prev) {
+          return retry;
+        }
+        const mergedResolved = { ...prev.resolved, ...retry.resolved };
+        const unresolved = Object.keys(mergedResolved).filter(
+          (name) => !mergedResolved[name]?.address
+        );
+        return { resolved: mergedResolved, unresolved };
+      });
+    } catch (err) {
+      if (!isAbortError(err)) {
+        setError('Failed to retry ENS resolution.');
+      }
+    } finally {
+      setEnsRetrying(false);
+    }
+  };
+
+  const runDeterminismCheck = async (
+    merged: ProofWalletRow[],
+    gateResult: EvaluationWalletGateResult,
+    usageWindow: ReturnType<typeof buildUsageWindow>,
+    runId: number
+  ) => {
+    const candidate = gateResult.wallets.find((wallet) => {
+      const source = gateResult.sourcesByAddress.get(wallet);
+      return Boolean(source?.hasEns && source?.hasAddress);
+    });
+    if (!candidate) {
+      setDeterminismCheck(null);
+      return;
+    }
+
+    const source = gateResult.sourcesByAddress.get(candidate);
+    const ensName = source?.ensNames[0];
+    const row = merged.find((entry) => entry.wallet.toLowerCase() === candidate);
+    const proofHash = row?.output?.proof?.canonical_hash;
+    if (!proofHash) {
+      setDeterminismCheck({ status: 'mismatch', address: candidate, ensName });
+      return;
+    }
+
+    try {
+      const response = await demoApiFetch<ProofEvaluateResponse>('/v1/evaluate', {
+        method: 'POST',
+        body: JSON.stringify({
+          wallet: candidate,
+          campaign_id: campaignId,
+          window: usageWindow
+        })
+      });
+      if (runIdRef.current !== runId) {
+        return;
+      }
+      const match = response.output.proof.canonical_hash === proofHash;
+      setDeterminismCheck({
+        status: match ? 'ok' : 'mismatch',
+        address: candidate,
+        ensName
+      });
+    } catch {
+      if (runIdRef.current !== runId) {
+        return;
+      }
+      setDeterminismCheck({ status: 'mismatch', address: candidate, ensName });
+    }
   };
 
   const handleRun = async () => {
@@ -526,11 +713,14 @@ const DemoProofPageInner = () => {
       return;
     }
 
-    const normalized = normalizeWalletInput(inputValue);
-    if (!normalized.valid.length) {
-      setError('Enter at least one valid wallet.');
+    const normalized = normalizeWalletInputs(inputValue);
+    if (!normalized.addresses.length && !normalized.ensNames.length) {
+      setError('Enter at least one valid wallet or ENS name.');
       return;
     }
+
+    const runId = runIdRef.current + 1;
+    runIdRef.current = runId;
 
     if (abortRef.current) {
       abortRef.current.abort();
@@ -543,26 +733,98 @@ const DemoProofPageInner = () => {
     setError(null);
     setRows([]);
     setSelected(null);
-    setProgress({ processed: 0, total: normalized.valid.length });
+    setEnsResolution(null);
+    setGateInvalids([]);
+    setDeterminismCheck(null);
+    setProgress({ processed: 0, total: 0 });
 
     try {
+      let ensResult: EnsBatchResult = { resolved: {}, unresolved: [] };
+      if (normalized.ensNames.length) {
+        ensResult = await resolveEnsBatch(normalized.ensNames, {
+          concurrency: 5,
+          signal: controller.signal
+        });
+        setEnsResolution(ensResult);
+
+        if (isDev) {
+          const errorCounts = ensResult.unresolved.reduce<Record<string, number>>(
+            (acc, name) => {
+              const reason = ensResult.resolved[name]?.error ?? 'not_found';
+              acc[reason] = (acc[reason] ?? 0) + 1;
+              return acc;
+            },
+            {}
+          );
+          const resolvedCount = Object.values(ensResult.resolved).filter(
+            (entry) => Boolean(entry.address)
+          ).length;
+          console.info('[ens] resolve summary', {
+            total: normalized.ensNames.length,
+            resolved: resolvedCount,
+            unresolved: ensResult.unresolved.length,
+            errors: errorCounts
+          });
+        }
+      }
+
+      const gateResult: EvaluationWalletGateResult = buildEvaluationWallets(
+        normalized.inputs,
+        ensResult.resolved
+      );
+      setGateInvalids(gateResult.invalid);
+
+      const orderedAddresses = gateResult.wallets;
+      const addressMeta = gateResult.metaByAddress;
+
+      if (!orderedAddresses.length) {
+        setError('No resolvable wallets to evaluate.');
+        return;
+      }
+
+      setProgress({ processed: 0, total: orderedAddresses.length });
+
+      const applyMeta = (row: ProofWalletRow): ProofWalletRow => {
+        const meta = addressMeta.get(row.wallet.toLowerCase());
+        if (!meta) {
+          return { ...row, input_source: row.input_source ?? 'address' };
+        }
+        return {
+          ...row,
+          display_name: meta.display_name ?? null,
+          input_source: meta.input_source,
+          ens_cached: meta.ens_cached ?? false
+        };
+      };
+
+      const usageWindow = buildUsageWindow(windowType);
       const result = await runProofEvaluation({
-        wallets: normalized.valid,
+        wallets: orderedAddresses,
         campaignId,
-        window: buildUsageWindow(windowType),
-        criteriaSetId,
+        window: usageWindow,
+        criteriaSetId: safeCriteriaSetId,
         signal: controller.signal,
         onProgress: (nextProgress) => {
           setProgress({
             processed: nextProgress.processed,
             total: nextProgress.total
           });
-          setRows(nextProgress.rows);
+          setRows(nextProgress.rows.map(applyMeta));
         }
       });
 
       if (!controller.signal.aborted) {
-        setRows(result.rows);
+        const merged = result.rows.map(applyMeta);
+        setRows(merged);
+        if (isDev) {
+          console.info('[proof] run summary', {
+            evaluated: merged.length,
+            source: result.source
+          });
+        }
+        if (isDev) {
+          void runDeterminismCheck(merged, gateResult, usageWindow, runId);
+        }
       }
     } catch (err: unknown) {
       if (isAbortError(err)) {
@@ -586,7 +848,7 @@ const DemoProofPageInner = () => {
       rows: sortedResults,
       campaignId,
       windowType,
-      criteriaSetId
+      criteriaSetId: safeCriteriaSetId
     });
   };
   const handleCopyShareLink = async () => {
@@ -594,16 +856,16 @@ const DemoProofPageInner = () => {
       return;
     }
 
-    const rawTooLong = inputValue.length > 1500 && parsedWallets.valid.length > 0;
+    const rawTooLong = inputValue.length > 1500 && validEntries > 0;
     setShareWarning(
       rawTooLong ? 'Wallet list is long; share link uses normalized wallets.' : null
     );
 
     const params = serializeProofState({
       walletsRaw: inputValue,
-      normalizedWallets: parsedWallets.valid,
+      normalizedWallets: normalizedInputList,
       windowType,
-      criteriaSetId,
+      criteriaSetId: safeCriteriaSetId,
       filters
     });
 
@@ -687,11 +949,76 @@ const DemoProofPageInner = () => {
         onNormalize={handleNormalize}
         onPasteSample={handlePasteSample}
         onClear={handleClear}
-        validCount={parsedWallets.valid.length}
-        invalidCount={parsedWallets.invalid.length}
+        totalCount={totalEntries}
+        validCount={validEntries}
+        invalidCount={invalidEntries}
+        ensTotal={ensStats.total}
+        ensResolved={ensStats.resolved}
+        ensUnresolved={ensStats.unresolved}
         disabled={loading}
         loadingSample={sampleLoading}
       />
+
+      {invalidList.length > 0 && (
+        <div className="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-4 text-sm text-rose-100">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-xs uppercase tracking-[0.2em] text-rose-200">
+              Invalid entries
+            </span>
+            <div className="flex flex-wrap items-center gap-3 text-xs text-rose-200">
+              {hasUnresolvedEns && (
+                <button
+                  type="button"
+                  onClick={handleRetryUnresolvedEns}
+                  disabled={ensRetrying || loading}
+                  className="rounded-full border border-rose-400/30 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-rose-100 transition hover:text-white disabled:cursor-not-allowed disabled:text-rose-300/60"
+                >
+                  {ensRetrying ? 'Retrying...' : 'Retry unresolved ENS'}
+                </button>
+              )}
+              <span>{invalidList.length} items</span>
+            </div>
+          </div>
+          <div className="mt-3 grid gap-2 text-xs">
+            {invalidList.map((entry) => {
+              const hint = ensErrorHints[entry.reason];
+              return (
+                <div
+                  key={`${entry.value}-${entry.reason}`}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2"
+                >
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <span className="font-mono text-rose-100">{entry.value}</span>
+                    {hint && (
+                      <span className="text-[10px] uppercase tracking-[0.2em] text-rose-200/70">
+                        {hint}
+                      </span>
+                    )}
+                  </div>
+                  <span className="rounded-full border border-rose-400/30 px-2 py-0.5 text-[10px] uppercase tracking-[0.2em] text-rose-200">
+                    {entry.reason}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {isDev && determinismCheck && (
+        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-xs text-emerald-100">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="uppercase tracking-[0.2em]">
+              {determinismCheck.status === 'ok'
+                ? 'Determinism OK'
+                : 'Determinism mismatch'}
+            </span>
+            <span className="font-mono text-emerald-200/80">
+              {determinismCheck.ensName ?? determinismCheck.address}
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
@@ -724,13 +1051,18 @@ const DemoProofPageInner = () => {
               className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white"
             >
               {criteriaSetIds.map((id) => (
-                <option key={id} value={id}>
+                <option
+                  key={id}
+                  value={id}
+                  disabled={!criteriaPresets[id].enabled}
+                  title={criteriaPresets[id].hint}
+                >
                   {criteriaPresets[id].label}
                 </option>
               ))}
             </select>
             <span className="text-xs text-slate-500">
-              Presets are UI-side filters for demo; verification proof remains deterministic.
+              Criteria sets are sent to the API; additional presets are coming soon.
             </span>
           </label>
 
@@ -739,7 +1071,7 @@ const DemoProofPageInner = () => {
               <button
                 type="button"
                 onClick={handleRun}
-                disabled={loading || parsedWallets.valid.length === 0 || !baseUrl}
+                disabled={loading || validEntries === 0 || !baseUrl}
                 className="inline-flex items-center justify-center rounded-full bg-white px-6 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-black transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:bg-white/40 disabled:text-slate-500"
               >
                 {loading ? 'Running...' : 'Run'}

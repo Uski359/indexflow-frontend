@@ -45,6 +45,7 @@ const buildCsvContent = (rows: ProofWalletRow[]) => {
     'cached_commentary',
     'source'
   ];
+  headers.push('display_name', 'input_source', 'ens_cached');
   if (includeCommentary) {
     headers.push('commentary');
   }
@@ -71,7 +72,10 @@ const buildCsvContent = (rows: ProofWalletRow[]) => {
       Boolean(row.cached_core),
       Boolean(row.cached_insights),
       Boolean(row.cached_commentary),
-      row.source
+      row.source,
+      row.display_name ?? '',
+      row.input_source ?? '',
+      Boolean(row.ens_cached)
     ];
 
     if (includeCommentary) {
@@ -96,7 +100,8 @@ export const exportProofCsv = ({
 
   const csv = buildCsvContent(rows);
   const date = formatDateYYYYMMDD(new Date());
-  const filename = `indexflow_proof_${campaignId}_${windowType}_${criteriaSetId}_${date}.csv`;
+  const safeCriteria = criteriaSetId.replace(/[^a-z0-9-_]+/gi, '_');
+  const filename = `indexflow_proof_${campaignId}_${windowType}_${safeCriteria}_${date}.csv`;
 
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -108,4 +113,3 @@ export const exportProofCsv = ({
   link.remove();
   URL.revokeObjectURL(url);
 };
-

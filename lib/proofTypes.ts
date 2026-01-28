@@ -14,6 +14,9 @@ export type ProofDataSource = 'commentary' | 'insights' | 'core';
 
 export type ProofWalletRow = {
   wallet: string;
+  display_name?: string | null;
+  input_source?: 'ens' | 'address';
+  ens_cached?: boolean;
   output?: CoreOutputV1;
   insights?: InsightV1;
   commentary?: CommentaryV1;
@@ -57,8 +60,15 @@ export type ProofCampaignInsightsResponse = CampaignInsightsResponse;
 export type ProofCampaignRunResponse = CampaignRunResponse;
 
 export type NormalizedWallets = {
-  valid: string[];
+  inputs: Array<{
+    raw: string;
+    kind: 'address' | 'ens' | 'invalid';
+    normalized?: string;
+  }>;
+  addresses: string[];
+  ensNames: string[];
   invalid: string[];
+  mapping: Record<string, { display: string; address?: string }>;
 };
 
 export type ProofRunResult = {

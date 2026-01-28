@@ -8,7 +8,7 @@ import type {
 } from '@/app/demo/proof/components/ProofFilters';
 import type { ProofWindowType } from '@/lib/proofTypes';
 
-export type CriteriaSetId = 'default' | 'active' | 'strict' | 'anti_farm';
+export type CriteriaSetId = 'default' | 'airdrop/basic@1' | 'airdrop/strict@1';
 
 export type ProofUrlState = {
   walletsRaw: string;
@@ -24,7 +24,8 @@ export type ParsedProofUrlState = Partial<
 >;
 
 const windowTypes: ProofWindowType[] = ['last_7_days', 'last_30_days'];
-const criteriaSetIds: CriteriaSetId[] = ['default', 'active', 'strict', 'anti_farm'];
+const criteriaSetIds: CriteriaSetId[] = ['default', 'airdrop/basic@1', 'airdrop/strict@1'];
+const enabledCriteriaSetIds: CriteriaSetId[] = ['default'];
 const verifiedFilters: ProofVerifiedFilter[] = ['all', 'true', 'false'];
 const tagFilters: ProofTagFilter[] = [
   'all',
@@ -118,7 +119,7 @@ export const parseProofState = (
     next.windowType = windowType;
   }
 
-  if (isOneOf(criteriaSetId, criteriaSetIds)) {
+  if (isOneOf(criteriaSetId, enabledCriteriaSetIds)) {
     next.criteriaSetId = criteriaSetId;
   }
 

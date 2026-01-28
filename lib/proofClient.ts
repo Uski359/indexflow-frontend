@@ -4,7 +4,6 @@ import type { UsageWindow } from '@/lib/types';
 
 import { isAbortError, runBatch } from './proofRunner';
 import type {
-  NormalizedWallets,
   ProofCampaignCommentaryResponse,
   ProofCampaignInsightsResponse,
   ProofCampaignRunResponse,
@@ -14,8 +13,6 @@ import type {
   ProofWalletRow,
   ProofWindowType
 } from './proofTypes';
-
-const addressRegex = /^0x[a-f0-9]{40}$/;
 
 const windowSeconds: Record<ProofWindowType, number> = {
   last_7_days: 7 * 24 * 60 * 60,
@@ -28,32 +25,6 @@ export const buildUsageWindow = (type: ProofWindowType): UsageWindow => {
   const end = Math.floor(Date.now() / 1000);
   const start = end - windowSeconds[type];
   return { type, start, end };
-};
-
-export const normalizeWalletInput = (input: string): NormalizedWallets => {
-  const tokens = input
-    .split(/[\s,]+/)
-    .map((token) => token.trim())
-    .filter(Boolean);
-
-  const valid: string[] = [];
-  const invalid: string[] = [];
-  const seen = new Set<string>();
-
-  for (const token of tokens) {
-    const normalized = token.toLowerCase();
-    if (!addressRegex.test(normalized)) {
-      invalid.push(token);
-      continue;
-    }
-    if (seen.has(normalized)) {
-      continue;
-    }
-    seen.add(normalized);
-    valid.push(normalized);
-  }
-
-  return { valid, invalid };
 };
 
 export const fetchMockWallets = async (
