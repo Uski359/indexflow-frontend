@@ -30,6 +30,8 @@ export type EvaluationWalletGateResult = {
 const ADDRESS_REGEX = /^0x[a-f0-9]{40}$/;
 const ENS_REGEX = /^[a-z0-9-]+(\.[a-z0-9-]+)*\.eth$/;
 
+const normalizeEnsName = (value: string) => value.trim().toLowerCase();
+
 const createAbortError = () => {
   if (typeof DOMException !== 'undefined') {
     return new DOMException('Aborted', 'AbortError');
@@ -107,14 +109,26 @@ export const normalizeWalletInputs = (rawText: string): NormalizedWallets => {
   return { inputs, addresses, ensNames, invalid, mapping };
 };
 
+export const resolveEns = async (
+  name: string,
+  options: { signal?: AbortSignal } = {}
+): Promise<EnsResolveResponse> => {
+  const normalized = normalizeEnsName(name);
+  return demoApiFetch<EnsResolveResponse>(
+    `/v1/ens/resolve?name=${encodeURIComponent(normalized)}`,
+    { signal: options.signal }
+  );
+};
+
 export const resolveEnsBatch = async (
   ensNames: string[],
   options: { concurrency?: number; signal?: AbortSignal } = {}
 ): Promise<EnsBatchResult> => {
   const { concurrency = 5, signal } = options;
   const resolved: EnsBatchResult['resolved'] = {};
+  const normalizedNames = ensNames.map(normalizeEnsName).filter(Boolean);
 
-  if (!ensNames.length) {
+  if (!normalizedNames.length) {
     return { resolved, unresolved: [] };
   }
 
@@ -138,10 +152,10 @@ export const resolveEnsBatch = async (
         reject(createAbortError());
         return;
       }
-      if (active > 0 || nextIndex < ensNames.length) {
+      if (active > 0 || nextIndex < normalizedNames.length) {
         return;
       }
-      const unresolved = ensNames.filter((name) => {
+      const unresolved = normalizedNames.filter((name) => {
         const entry = resolved[name];
         return !entry?.address;
       });
@@ -154,15 +168,16 @@ export const resolveEnsBatch = async (
         return;
       }
 
-      while (active < concurrency && nextIndex < ensNames.length && !cancelled) {
-        const currentName = ensNames[nextIndex];
+      while (
+        active < concurrency &&
+        nextIndex < normalizedNames.length &&
+        !cancelled
+      ) {
+        const currentName = normalizedNames[nextIndex];
         nextIndex += 1;
         active += 1;
 
-        demoApiFetch<EnsResolveResponse>(
-          `/v1/ens/resolve?name=${encodeURIComponent(currentName)}`,
-          { signal }
-        )
+        resolveEns(currentName, { signal })
           .then((payload) => {
             const address =
               payload.normalized_address ??
