@@ -223,8 +223,8 @@ export const buildEvaluationWallets = (
 
   const upsertSource = (address: string, kind: 'ens' | 'address', ensName?: string) => {
     const existing =
-      sourcesByAddress.get(address) ?? ({ hasEns: false, hasAddress: false, ensNames: [] } as const);
-    const next = { ...existing };
+      sourcesByAddress.get(address) ?? { hasEns: false, hasAddress: false, ensNames: [] as string[] };
+    const next = { ...existing, ensNames: [...existing.ensNames] };
     if (kind === 'ens') {
       next.hasEns = true;
       if (ensName && !next.ensNames.includes(ensName)) {
