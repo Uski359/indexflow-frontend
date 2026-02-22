@@ -144,6 +144,33 @@ const ensErrorHints: Record<string, string> = {
   not_found: 'name not registered / no resolver'
 };
 
+const parseProofErrorHint = (value?: string | null) => {
+  if (!value) {
+    return null;
+  }
+
+  const rpcMatch = value.match(/rpc_missing(?::([A-Z0-9_<>-]+))?/i);
+  if (rpcMatch) {
+    const envKey = rpcMatch[1];
+    return envKey ? `rpc_missing (${envKey})` : 'rpc_missing';
+  }
+
+  const campaignMatch = value.match(/Unknown campaign_id:\s*([a-zA-Z0-9_@./-]+)/i);
+  if (campaignMatch) {
+    return `unknown campaign (${campaignMatch[1]})`;
+  }
+
+  if (/db_not_indexed_for_targets/i.test(value)) {
+    return 'db_not_indexed_for_targets';
+  }
+
+  if (/db_not_indexed/i.test(value)) {
+    return 'db_not_indexed';
+  }
+
+  return null;
+};
+
 const DemoProofPageInner = () => {
   const baseUrl = getDemoApiBaseUrl();
   const router = useRouter();
@@ -545,6 +572,27 @@ const DemoProofPageInner = () => {
     () => filteredResults.filter((entry) => entry.error).length,
     [filteredResults]
   );
+
+  const topErrorHint = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const row of filteredResults) {
+      const hint = parseProofErrorHint(row.error);
+      if (!hint) {
+        continue;
+      }
+      counts.set(hint, (counts.get(hint) ?? 0) + 1);
+    }
+
+    let best: string | null = null;
+    let bestCount = 0;
+    for (const [hint, count] of counts.entries()) {
+      if (count > bestCount) {
+        best = hint;
+        bestCount = count;
+      }
+    }
+    return best;
+  }, [filteredResults]);
 
   const syncUrlWith = (walletsRaw: string, normalizedWallets: string[]) => {
     if (!isHydrated) {
@@ -1134,7 +1182,10 @@ const DemoProofPageInner = () => {
                 Showing {sortedResults.length} of {rows.length} wallets
               </span>
               {errorCount > 0 && (
-                <span className="text-rose-300">Errors: {errorCount}</span>
+                <span className="text-rose-300">
+                  Errors: {errorCount}
+                  {topErrorHint ? ` (${topErrorHint})` : ''}
+                </span>
               )}
             </div>
             {sortedResults.length > 0 && (
