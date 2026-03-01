@@ -10,6 +10,7 @@ import LoadingSkeleton from '@/components/ui/LoadingSkeleton';
 import PageHeader from '@/components/ui/PageHeader';
 import { demoApiFetch, getDemoApiBaseUrl } from '@/lib/api';
 import LaunchYourCampaignCard from '@/src/features/campaignLaunch/LaunchYourCampaignCard';
+import type { CampaignPreviewParticipant } from '@/src/features/campaignLaunch/types';
 import type {
   CampaignCommentaryResponse,
   CampaignInsightsResponse,
@@ -381,6 +382,38 @@ const DemoCampaignPage = () => {
 
   const total = data?.summary.total ?? 0;
   const sourceLabel = source ?? 'unknown';
+  const previewParticipants = useMemo<CampaignPreviewParticipant[] | undefined>(() => {
+    if (!data || !source) {
+      return undefined;
+    }
+
+    if (source === 'run') {
+      const runResults = data.results as CampaignRunResponse['results'];
+      return runResults.map((entry) => ({
+        wallet: entry.wallet,
+        score:
+          entry.output.usage_summary.tx_count * 4 +
+          entry.output.usage_summary.days_active * 6 +
+          entry.output.usage_summary.unique_contracts * 8,
+        walletAgeDays:
+          entry.output.usage_summary.days_active * 21 +
+          entry.output.usage_summary.unique_contracts * 14,
+        activeDaysLast14: Math.min(14, entry.output.usage_summary.days_active),
+        proofUsageEvents: entry.output.usage_summary.tx_count
+      }));
+    }
+
+    const insightResults = data.results as WalletRowWithInsights[];
+    return insightResults.map((entry) => ({
+      wallet: entry.wallet,
+      score: entry.insights.overall_score,
+      walletAgeDays:
+        entry.output.usage_summary.days_active * 21 +
+        entry.output.usage_summary.unique_contracts * 14,
+      activeDaysLast14: Math.min(14, entry.output.usage_summary.days_active),
+      proofUsageEvents: entry.output.usage_summary.tx_count
+    }));
+  }, [data, source]);
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-10">
@@ -400,7 +433,10 @@ const DemoCampaignPage = () => {
         }
       />
 
-      <LaunchYourCampaignCard />
+      <LaunchYourCampaignCard
+        participants={previewParticipants}
+        supportsProofUsageFilter
+      />
 
       <Link href="/demo/proof" className="text-sm text-slate-400 hover:text-slate-200">
         Back to proof
