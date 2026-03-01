@@ -4,8 +4,7 @@ import { Coins } from 'lucide-react';
 
 import { useStats } from '@/hooks/useStats';
 import { formatLargeNumber } from '@/lib/format';
-
-import Card from './Card';
+import StatCard from './ui/StatCard';
 
 const SupplyStat = () => {
   const { supply, isLoading, error } = useStats();
@@ -24,24 +23,22 @@ const SupplyStat = () => {
       : typeof value === 'number'
         ? value.toLocaleString(undefined, { maximumFractionDigits: 18 })
         : String(value);
+  const status = error
+    ? { label: 'Unavailable', tone: 'danger' as const }
+    : isLoading
+      ? { label: 'Syncing', tone: 'default' as const }
+      : { label: 'Live', tone: 'success' as const };
 
   return (
-    <Card title="Total Supply" subtitle="Indexed token supply" className="h-full">
-      <div className="flex items-center justify-between">
-        <div>
-          <p
-            className="text-3xl font-semibold tracking-tight text-white"
-            title={error ? 'Failed to load supply' : isLoading ? 'Loading supply...' : fullValueLabel}
-          >
-            {display}
-          </p>
-          <p className="text-sm text-gray-400">Updated live from transfers</p>
-        </div>
-        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-accent/20 text-accent">
-          <Coins size={22} />
-        </div>
-      </div>
-    </Card>
+    <StatCard
+      title="Total Supply"
+      subtitle="Indexed token supply"
+      value={display}
+      helperText={error ? 'Failed to load supply' : isLoading ? 'Loading supply...' : fullValueLabel}
+      icon={<Coins size={22} />}
+      status={status}
+      className="h-full"
+    />
   );
 };
 

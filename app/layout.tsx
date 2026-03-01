@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import { Manrope } from 'next/font/google';
 import type { ReactNode } from 'react';
 
 import Layout from '@/components/Layout';
@@ -8,17 +8,17 @@ import { AppProviders } from './providers';
 
 import '../styles/globals.css';
 
-const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
+const manrope = Manrope({ subsets: ['latin'], variable: '--font-manrope' });
 
 export const metadata: Metadata = {
-  title: 'IndexFlow Explorer',
-  description: 'Multi-chain IndexFlow dashboard for holders, supply, and transfers'
+  title: 'IndexFlow',
+  description: 'Minimal monitoring workspace for protocol indexing and proof checks'
 };
 
 const RootLayout = ({ children }: { children: ReactNode }) => {
   return (
-    <html lang="en" className={inter.variable}>
-      <body className={`${inter.className} bg-[#0a0a0f] text-white antialiased`}>
+    <html lang="en" className={manrope.variable}>
+      <body className={`${manrope.className} bg-background text-slate-100 antialiased`}>
         <AppProviders>
           <ChainProvider>
             <Layout>{children}</Layout>

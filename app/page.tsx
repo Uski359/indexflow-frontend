@@ -8,16 +8,28 @@ import StakingSummary from '@/components/StakingSummary';
 import SupplyStat from '@/components/SupplyStat';
 import ThroughputStat from '@/components/ThroughputStat';
 import TransferTable from '@/components/TransferTable';
+import PageHeader from '@/components/ui/PageHeader';
 
 const DashboardPage = () => {
   return (
     <div className="space-y-6">
+      <PageHeader
+        eyebrow="Overview"
+        title="Protocol indexer"
+        subtitle="A single workspace for protocol health, throughput, and proof signals. Advanced operational pages stay available in code, but the UI now keeps the focus on the core product flows."
+        actions={
+          <div className="rounded-full bg-white/5 px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-300">
+            Core views only
+          </div>
+        }
+      />
+
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <SupplyStat />
         <HolderStat />
         <ThroughputStat />
-        <Card title="IndexFlow" subtitle="Multi-chain coverage" className="h-full">
-          <p className="text-sm text-gray-300">
+        <Card title="Coverage" subtitle="Supported execution layers" className="h-full">
+          <p className="text-sm text-slate-300">
             Monitor Sepolia, Polygon, Arbitrum, Base, and Optimism with a single toggle.
           </p>
         </Card>
@@ -35,9 +47,9 @@ const DashboardPage = () => {
           <div>
             <p className="text-sm uppercase tracking-[0.18em] text-accent">Token Utility</p>
             <h2 className="text-xl font-semibold text-white">
-              Staking - Proof-of-Indexing - Share-to-Earn
+              Staking | Proof-of-Indexing | Share-to-Earn
             </h2>
-            <p className="text-sm text-gray-400">
+            <p className="text-sm text-slate-300">
               Live protocol signals flowing from the utility contracts.
             </p>
           </div>
@@ -53,7 +65,11 @@ const DashboardPage = () => {
         </div>
       </section>
 
-      <TransferTable limit={10} title="Latest Transfers" />
+      <TransferTable
+        limit={8}
+        title="Latest Transfers"
+        subtitle="Recent movement across the active chain"
+      />
     </div>
   );
 };

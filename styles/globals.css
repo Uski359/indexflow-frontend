@@ -4,18 +4,26 @@
 
 :root {
   color-scheme: dark;
-  background-color: #0a0a0f;
+  background-color: #07131d;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html {
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top right, rgba(56, 189, 248, 0.14), transparent 34%),
+    radial-gradient(circle at top left, rgba(15, 23, 42, 0.5), transparent 38%),
+    linear-gradient(180deg, #07131d 0%, #091722 52%, #0b1824 100%);
+}
+
 body {
   margin: 0;
   min-height: 100vh;
-  background-color: #0a0a0f;
-  color: #e5e7eb;
+  background-color: transparent;
+  color: #e2e8f0;
 }
 
 a {
@@ -33,10 +41,10 @@ table {
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: #1f1f2a;
+  background-color: #203244;
   border-radius: 999px;
 }
 
 ::-webkit-scrollbar-track {
-  background-color: #0a0a0f;
+  background-color: rgba(7, 19, 29, 0.9);
 }

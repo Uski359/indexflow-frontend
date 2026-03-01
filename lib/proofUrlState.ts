@@ -24,7 +24,6 @@ export type ParsedProofUrlState = Partial<
 >;
 
 const windowTypes: ProofWindowType[] = ['last_7_days', 'last_30_days'];
-const criteriaSetIds: CriteriaSetId[] = ['default', 'airdrop/basic@1', 'airdrop/strict@1'];
 const enabledCriteriaSetIds: CriteriaSetId[] = ['default'];
 const verifiedFilters: ProofVerifiedFilter[] = ['all', 'true', 'false'];
 const tagFilters: ProofTagFilter[] = [

@@ -381,8 +381,8 @@ const DemoCampaignPage = () => {
     <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-10">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <Link href="/demo" className="text-sm text-slate-400 hover:text-slate-200">
-            Back to demo
+          <Link href="/demo/proof" className="text-sm text-slate-400 hover:text-slate-200">
+            Back to proof
           </Link>
           <h1 className="mt-3 text-2xl font-semibold text-white">
             Campaign: {campaignId}

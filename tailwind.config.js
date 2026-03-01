@@ -9,18 +9,18 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        background: '#0a0a0f',
-        card: '#111118',
-        accent: '#7c3aed',
-        border: '#1f1f2a',
-        muted: '#9ca3af'
+        background: '#07131d',
+        card: '#10202d',
+        accent: '#38bdf8',
+        border: '#203244',
+        muted: '#94a3b8'
       },
       fontFamily: {
-        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        sans: ['Manrope', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace']
       },
       boxShadow: {
-        card: '0 18px 40px -28px rgba(124, 58, 237, 0.6)'
+        card: '0 20px 45px -30px rgba(8, 145, 178, 0.45)'
       }
     }
   },

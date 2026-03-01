@@ -17,6 +17,9 @@ import { Activity } from 'lucide-react';
 import { useStats } from '@/hooks/useStats';
 
 import Card from './Card';
+import EmptyState from './ui/EmptyState';
+import ErrorState from './ui/ErrorState';
+import LoadingSkeleton from './ui/LoadingSkeleton';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
 
@@ -38,8 +41,8 @@ const ActivityChart = () => {
         label: 'Transfers',
         data: series.map((point) => point.count),
         fill: true,
-        borderColor: '#7C3AED',
-        backgroundColor: 'rgba(124, 58, 237, 0.12)',
+        borderColor: '#38BDF8',
+        backgroundColor: 'rgba(56, 189, 248, 0.14)',
         pointRadius: 3,
         tension: 0.35
       }
@@ -84,14 +87,22 @@ const ActivityChart = () => {
       className="h-full"
     >
       {error ? (
-        <p className="text-sm text-red-300">Failed to load activity data.</p>
+        <ErrorState
+          title="Activity unavailable"
+          description="Recent transfer activity could not be loaded."
+          compact
+        />
       ) : isLoading && !hasData ? (
-        <p className="text-sm text-gray-400">Loading activity...</p>
+        <LoadingSkeleton lines={6} className="py-2" />
       ) : !hasData ? (
-        <p className="text-sm text-gray-400">No recent activity found.</p>
+        <EmptyState
+          title="No activity yet"
+          description="New transfers will appear here once the indexer reports fresh traffic."
+          compact
+        />
       ) : (
         <div className="h-64">
-          <p className="mb-2 text-sm text-gray-400">
+          <p className="mb-2 text-sm text-slate-300">
             24h volume: {volume24h.toLocaleString()}
           </p>
           <Line options={options} data={chartData} />

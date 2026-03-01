@@ -1,14 +1,17 @@
 'use client';
 
-import classNames from 'classnames';
-import { ArrowRightLeft, ExternalLink, Clock3 } from 'lucide-react';
+import { ArrowRightLeft, Clock3, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
 import { formatEther } from 'viem';
 
+import { featureToggles } from '@/config/features';
 import { useTransfers } from '@/hooks/useTransfers';
 import type { Transfer } from '@/types';
 
 import Card from './Card';
+import EmptyState from './ui/EmptyState';
+import ErrorState from './ui/ErrorState';
+import LoadingSkeleton from './ui/LoadingSkeleton';
 
 type TransferTableProps = {
   limit?: number;
@@ -21,7 +24,9 @@ const shorten = (value: string, size = 4) =>
   value.length > size * 2 ? `${value.slice(0, size + 2)}...${value.slice(-size)}` : value;
 
 const formatValue = (value: string) => {
-  if (!value) return '—';
+  if (!value) {
+    return 'N/A';
+  }
 
   if (/^-?\d+$/.test(value)) {
     try {
@@ -33,17 +38,24 @@ const formatValue = (value: string) => {
   }
 
   const num = Number(value);
-  if (Number.isNaN(num)) return value;
-  if (num >= 1e6) return `${num.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  if (Number.isNaN(num)) {
+    return value;
+  }
+
+  if (num >= 1e6) {
+    return `${num.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  }
+
   return num.toLocaleString();
 };
 
 const formatTimestamp = (timestamp?: number | string) => {
-  if (!timestamp) return 'N/A';
+  if (!timestamp) {
+    return 'N/A';
+  }
 
   const parsed = Number(timestamp);
   if (!Number.isNaN(parsed)) {
-    // If seconds, convert to ms
     const millis = parsed < 1e12 ? parsed * 1000 : parsed;
     return new Date(millis).toLocaleString();
   }
@@ -63,20 +75,19 @@ const getExplorerUrl = (chain: string | undefined, txHash: string) => {
     optimism: 'https://optimistic.etherscan.io/tx/'
   };
 
-  const base = map[normalized] ?? map.ethereum;
-  return `${base}${txHash}`;
+  return `${map[normalized] ?? map.ethereum}${txHash}`;
 };
 
 const TransferRow = ({ transfer }: { transfer: Transfer }) => {
   const block = transfer.blockNumber ?? transfer.block ?? 0;
-  const valueDisplay = transfer.value ? formatValue(transfer.value) : '—';
+  const valueDisplay = transfer.value ? formatValue(transfer.value) : 'N/A';
   const explorerUrl = getExplorerUrl(transfer.chain, transfer.txHash);
 
   return (
-    <tr className="border-b border-[#1f1f2a] last:border-0">
-      <td className="px-3 py-3 text-sm text-gray-300">{transfer.chain?.toUpperCase()}</td>
-      <td className="px-3 py-3 text-sm text-gray-300">{block}</td>
-      <td className="px-3 py-3 text-sm text-gray-300">
+    <tr className="border-b border-border/60 last:border-0">
+      <td className="px-3 py-3 text-sm text-slate-300">{transfer.chain?.toUpperCase()}</td>
+      <td className="px-3 py-3 text-sm text-slate-300">{block}</td>
+      <td className="px-3 py-3 text-sm text-slate-300">
         <Link
           href={explorerUrl}
           target="_blank"
@@ -88,17 +99,17 @@ const TransferRow = ({ transfer }: { transfer: Transfer }) => {
         </Link>
       </td>
       <td className="px-3 py-3 text-sm">
-        <p className="font-mono text-xs text-gray-200">{shorten(transfer.from, 6)}</p>
+        <p className="font-mono text-xs text-slate-200">{shorten(transfer.from, 6)}</p>
       </td>
       <td className="px-3 py-3 text-sm">
-        <p className="font-mono text-xs text-gray-200">{shorten(transfer.to, 6)}</p>
+        <p className="font-mono text-xs text-slate-200">{shorten(transfer.to, 6)}</p>
       </td>
       <td className="px-3 py-3 text-sm text-white">
         <span className="rounded-full bg-accent/10 px-2 py-1 text-xs text-accent">
           {valueDisplay}
         </span>
       </td>
-      <td className="px-3 py-3 text-sm text-gray-400">{formatTimestamp(transfer.timestamp)}</td>
+      <td className="px-3 py-3 text-sm text-slate-400">{formatTimestamp(transfer.timestamp)}</td>
     </tr>
   );
 };
@@ -108,31 +119,15 @@ const TransferTable = ({ limit, address, title, subtitle }: TransferTableProps) 
   const computedTitle = title ?? (address ? 'Wallet activity' : 'Latest transfers');
   const computedSubtitle =
     subtitle ?? (address ? 'Incoming and outgoing transfers' : 'Live firehose of movement');
-
-  const rows =
-    isLoading && transfers.length === 0
-      ? Array.from({ length: 5 }).map((_, idx) => (
-          <tr key={idx} className="border-b border-[#1f1f2a] last:border-0">
-            {Array.from({ length: 7 }).map((__, col) => (
-              <td key={col} className="px-3 py-3">
-                <div className="h-4 w-24 animate-pulse rounded bg-[#1f1f2a]" />
-              </td>
-            ))}
-          </tr>
-        ))
-      : transfers.map((transfer) => (
-          <TransferRow
-            key={`${transfer.txHash}-${transfer.blockNumber ?? transfer.block ?? 0}-${transfer.from}-${transfer.to}`}
-            transfer={transfer}
-          />
-        ));
+  const showViewAll = !address && featureToggles.transfers;
+  const isInitialLoading = isLoading && transfers.length === 0;
 
   return (
     <Card
       title={computedTitle}
       subtitle={computedSubtitle}
       actions={
-        !address && (
+        showViewAll ? (
           <Link
             href="/transfers"
             className="flex items-center gap-2 rounded-full bg-accent/10 px-3 py-1 text-xs text-accent transition hover:bg-accent/20"
@@ -140,14 +135,14 @@ const TransferTable = ({ limit, address, title, subtitle }: TransferTableProps) 
             <ArrowRightLeft size={14} />
             <span>View all</span>
           </Link>
-        )
+        ) : null
       }
       className="overflow-hidden"
     >
       <div className="overflow-x-auto">
         <table className="w-full text-left">
           <thead>
-            <tr className="border-b border-[#1f1f2a] text-xs uppercase tracking-wide text-gray-500">
+            <tr className="border-b border-border/70 text-xs uppercase tracking-[0.18em] text-slate-400">
               <th className="px-3 py-2">Chain</th>
               <th className="px-3 py-2">Block</th>
               <th className="px-3 py-2">Tx Hash</th>
@@ -162,26 +157,40 @@ const TransferTable = ({ limit, address, title, subtitle }: TransferTableProps) 
               </th>
             </tr>
           </thead>
-          <tbody
-            className={classNames(
-              'text-sm',
-              transfers.length === 0 && !isLoading ? 'text-gray-400' : ''
-            )}
-          >
-            {rows}
-            {error && !isLoading && (
+          <tbody className="text-sm">
+            {isInitialLoading ? (
               <tr>
-                <td colSpan={7} className="px-3 py-4 text-center text-red-300">
-                  Failed to load transfers.
+                <td colSpan={7} className="px-3 py-4">
+                  <LoadingSkeleton lines={5} className="py-2" />
                 </td>
               </tr>
-            )}
-            {!error && !isLoading && transfers.length === 0 && (
+            ) : error ? (
               <tr>
-                <td colSpan={7} className="px-3 py-4 text-center text-gray-400">
-                  No transfers found for this chain {address ? 'or address' : ''}.
+                <td colSpan={7} className="px-3 py-4">
+                  <ErrorState
+                    title="Transfers unavailable"
+                    description="Recent transfer data could not be loaded."
+                    compact
+                  />
                 </td>
               </tr>
+            ) : transfers.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-3 py-4">
+                  <EmptyState
+                    title="No transfers found"
+                    description={`No transfers were found for this ${address ? 'wallet or chain' : 'chain'} yet.`}
+                    compact
+                  />
+                </td>
+              </tr>
+            ) : (
+              transfers.map((transfer) => (
+                <TransferRow
+                  key={`${transfer.txHash}-${transfer.blockNumber ?? transfer.block ?? 0}-${transfer.from}-${transfer.to}`}
+                  transfer={transfer}
+                />
+              ))
             )}
           </tbody>
         </table>
