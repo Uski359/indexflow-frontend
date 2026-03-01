@@ -27,7 +27,7 @@ export const featureToggles: Record<FeatureKey, boolean> = {
   transfers: false,
   health: false,
   demoLanding: false,
-  demoCampaign: false,
+  demoCampaign: true,
   addressDetail: false,
   proofAlias: false
 };
@@ -36,8 +36,8 @@ const routeRegistry: FeatureRoute[] = [
   {
     key: 'overview',
     href: '/',
-    label: 'Overview',
-    description: 'Protocol and indexer summary',
+    label: 'Demo',
+    description: 'Demo-first landing experience',
     showInNav: true,
     matchMode: 'exact'
   },
@@ -46,6 +46,14 @@ const routeRegistry: FeatureRoute[] = [
     href: '/demo/proof',
     label: 'Proof',
     description: 'Proof-of-usage evaluation workspace',
+    showInNav: true,
+    matchMode: 'exact'
+  },
+  {
+    key: 'demoCampaign',
+    href: '/demo/campaign/airdrop_v1',
+    label: 'Campaign',
+    description: 'Primary campaign review flow',
     showInNav: true,
     matchMode: 'exact'
   },
@@ -77,17 +85,9 @@ const routeRegistry: FeatureRoute[] = [
     key: 'demoLanding',
     href: '/demo',
     label: 'Demo',
-    description: 'Internal demo launcher',
+    description: 'Detailed demo launcher kept outside primary nav',
     showInNav: false,
     matchMode: 'exact'
-  },
-  {
-    key: 'demoCampaign',
-    href: '/demo/campaign',
-    label: 'Campaign',
-    description: 'Legacy campaign detail view',
-    showInNav: false,
-    matchMode: 'prefix'
   },
   {
     key: 'addressDetail',

@@ -22,7 +22,7 @@ const Topbar = () => {
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
                 IndexFlow
               </p>
-              <h2 className="text-lg font-semibold text-white">Indexer workspace</h2>
+              <h2 className="text-lg font-semibold text-white">Demo workspace</h2>
             </div>
           </Link>
           <AppNavigation />

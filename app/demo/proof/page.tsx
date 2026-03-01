@@ -3,6 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 
+import ErrorState from '@/components/ui/ErrorState';
 import PageHeader from '@/components/ui/PageHeader';
 import { demoApiFetch, getDemoApiBaseUrl } from '@/lib/api';
 import {
@@ -982,9 +983,7 @@ const DemoProofPageInner = () => {
       />
 
       {error && (
-        <div className="rounded-2xl border border-rose-500/40 bg-rose-500/10 p-4 text-sm text-rose-100">
-          {error}
-        </div>
+        <ErrorState title="Proof flow unavailable" description={error} />
       )}
 
       <WalletInput
