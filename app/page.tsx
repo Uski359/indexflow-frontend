@@ -16,6 +16,7 @@ import SectionCard from '@/components/ui/SectionCard';
 import { uiFlags } from '@/config/uiFlags';
 
 const campaignHref = '/demo/campaign/airdrop_v1?window=last_30_days';
+const launchYourCampaignHref = `${campaignHref}#launch-your-campaign`;
 
 const campaignSteps = [
   'Choose the campaign and usage window.',
@@ -32,7 +33,7 @@ const DashboardPage = () => {
         subtitle="Start with the guided demo, move into proof evaluation, then review campaign output. The overview metrics remain in the codebase, but they are hidden from the default experience."
         actions={
           <Link
-            href="/demo"
+            href={launchYourCampaignHref}
             className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-slate-200"
           >
             <span>Launch your campaign</span>
@@ -60,7 +61,7 @@ const DashboardPage = () => {
             </p>
             <div className="mt-5 flex flex-wrap gap-3">
               <Link
-                href="/demo"
+                href={launchYourCampaignHref}
                 className="inline-flex items-center rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-slate-200"
               >
                 Launch your campaign

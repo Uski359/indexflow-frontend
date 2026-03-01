@@ -9,6 +9,7 @@ import ErrorState from '@/components/ui/ErrorState';
 import LoadingSkeleton from '@/components/ui/LoadingSkeleton';
 import PageHeader from '@/components/ui/PageHeader';
 import { demoApiFetch, getDemoApiBaseUrl } from '@/lib/api';
+import LaunchYourCampaignCard from '@/src/features/campaignLaunch/LaunchYourCampaignCard';
 import type {
   CampaignCommentaryResponse,
   CampaignInsightsResponse,
@@ -398,6 +399,8 @@ const DemoCampaignPage = () => {
           </>
         }
       />
+
+      <LaunchYourCampaignCard />
 
       <Link href="/demo/proof" className="text-sm text-slate-400 hover:text-slate-200">
         Back to proof
