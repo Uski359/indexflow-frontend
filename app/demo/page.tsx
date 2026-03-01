@@ -32,7 +32,7 @@ const DemoPage = () => {
       <PageHeader
         eyebrow="Demo"
         title="IndexFlow demo"
-        subtitle="Configure a mock campaign, choose a window, and move directly into the campaign review flow."
+        subtitle="Configure your campaign, choose a window, and move directly into the campaign review flow."
         actions={
           <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.2em] text-slate-400">
             Base URL: {baseUrl ?? 'Not set'}
@@ -94,7 +94,7 @@ const DemoPage = () => {
         disabled={!baseUrl}
         className="inline-flex items-center justify-center gap-2 self-start rounded-full bg-white px-6 py-3 text-sm font-semibold text-black transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:bg-white/40 disabled:text-slate-500"
       >
-        <span>Open campaign</span>
+        <span>Launch campaign</span>
         <ArrowRight size={16} />
       </button>
     </div>

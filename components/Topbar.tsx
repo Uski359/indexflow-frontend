@@ -3,8 +3,6 @@
 import Link from 'next/link';
 import { Sparkles } from 'lucide-react';
 
-import { primaryCtaRoute } from '@/config/features';
-
 import ChainSelector from './ChainSelector';
 import WalletButton from './WalletButton';
 import AppNavigation from './navigation/AppNavigation';
@@ -28,12 +26,6 @@ const Topbar = () => {
           <AppNavigation />
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Link
-            href={primaryCtaRoute.href}
-            className="inline-flex items-center justify-center rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-slate-200"
-          >
-            Run proof check
-          </Link>
           <ChainSelector />
           <WalletButton />
         </div>

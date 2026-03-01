@@ -35,7 +35,7 @@ const DashboardPage = () => {
             href="/demo"
             className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-slate-200"
           >
-            <span>Open Demo</span>
+            <span>Launch your campaign</span>
             <ArrowRight size={16} />
           </Link>
         }
@@ -45,7 +45,7 @@ const DashboardPage = () => {
         {uiFlags.showDemo ? (
           <SectionCard
             title="Demo"
-            description="Configure a mock campaign run and jump directly into results."
+            description="Configure your own campaign run and jump directly into results."
             eyebrow="Step 1"
             actions={
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-accent/10 text-accent">
@@ -55,7 +55,7 @@ const DashboardPage = () => {
             className="h-full"
           >
             <p className="text-sm leading-6 text-slate-300">
-              Pick the current campaign, choose a window, and launch the mock workflow without
+              Start by choosing a campaign and usage window, then launch the workflow without
               exposing internal analytics panels on the home screen.
             </p>
             <div className="mt-5 flex flex-wrap gap-3">
@@ -63,7 +63,7 @@ const DashboardPage = () => {
                 href="/demo"
                 className="inline-flex items-center rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-slate-200"
               >
-                Launch demo
+                Launch your campaign
               </Link>
             </div>
           </SectionCard>
