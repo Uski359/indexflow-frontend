@@ -170,19 +170,19 @@ const LaunchYourCampaignCard = ({
     const configurationStatus: CampaignChecklistStatus =
       basicsReady && allocationReady && eligibilityReady
         ? 'complete'
-        : isConnected
-          ? 'current'
-          : 'pending';
+        : 'current';
     const reviewStatus: CampaignChecklistStatus =
       previewReady && reviewConfirmed ? 'complete' : 'current';
     const launchStatus: CampaignChecklistStatus =
-      isConnected && isDraftLaunchable && previewReady ? 'complete' : 'pending';
+      isDraftLaunchable && previewReady ? 'complete' : 'pending';
 
     return [
       {
         label: 'Connect wallet',
         status: connectStatus,
-        helper: isConnected ? 'Wallet connected' : 'Connect to unlock launch'
+        helper: isConnected
+          ? 'Wallet connected'
+          : 'Optional for simulated launch; connect when you need onchain context'
       },
       {
         label: 'Choose campaign type',
@@ -216,7 +216,6 @@ const LaunchYourCampaignCard = ({
     basicsReady,
     draft.type,
     eligibilityReady,
-    isConnected,
     isDraftLaunchable,
     previewReady,
     reviewConfirmed
@@ -260,7 +259,7 @@ const LaunchYourCampaignCard = ({
   );
 
   const reviewReady = reviewChecks.every((item) => item.complete);
-  const canSubmit = isConnected && isDraftLaunchable && reviewReady;
+  const canSubmit = isDraftLaunchable && reviewReady;
   const showEmptyState = !hasStoredDraft && draft.name.trim().length === 0;
 
   const summaryCards = [
@@ -743,6 +742,12 @@ const LaunchYourCampaignCard = ({
                 )}
               >
                 {feedback.message}
+              </div>
+            ) : null}
+
+            {!isConnected ? (
+              <div className="rounded-2xl border border-white/5 bg-background/50 px-4 py-3 text-sm text-slate-300">
+                No wallet connected. Launch will run in simulated mode until you connect one.
               </div>
             ) : null}
 
