@@ -64,6 +64,14 @@ const formatPercent = (value: number): string =>
     maximumFractionDigits: 1
   })}%`;
 
+const serializeImportedParticipants = (
+  participants: CampaignPreviewParticipant[]
+): string => {
+  return participants
+    .map((participant) => `${participant.wallet},${participant.score}`)
+    .join('\n');
+};
+
 const importedParticipantDefaults = {
   walletAgeDays: 3650,
   activeDaysLast14: 14,
@@ -128,11 +136,13 @@ const ReviewRow = ({
 };
 
 const LaunchYourCampaignCard = ({
+  participants,
   supportsProofUsageFilter = false
 }: LaunchYourCampaignCardProps) => {
   const { isConnected } = useAccount();
   const router = useRouter();
   const cardRef = useRef<HTMLDivElement>(null);
+  const hasInitializedParticipantsRef = useRef(false);
   const [activeSection, setActiveSection] = useState<ConfigSection>('basics');
   const [participantInputMode, setParticipantInputMode] =
     useState<ParticipantInputMode>('paste');
@@ -189,6 +199,28 @@ const LaunchYourCampaignCard = ({
       cardRef.current?.focus();
     }
   }, []);
+
+  useEffect(() => {
+    if (hasInitializedParticipantsRef.current) {
+      return;
+    }
+
+    if (participantText.trim().length > 0 || participantCsvText.trim().length > 0) {
+      hasInitializedParticipantsRef.current = true;
+      return;
+    }
+
+    if (!participants || participants.length === 0) {
+      return;
+    }
+
+    setParticipantInputMode('paste');
+    setParticipantText(serializeImportedParticipants(participants));
+    setParticipantCsvText('');
+    setParticipantCsvName(null);
+    setParticipantCsvError(null);
+    hasInitializedParticipantsRef.current = true;
+  }, [participantCsvText, participantText, participants]);
 
   const preview = useMemo(
     () =>
