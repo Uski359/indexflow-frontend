@@ -47,11 +47,6 @@ export const launchCampaign = async (
         message: body?.message ?? 'Campaign launched'
       };
     }
-
-    if (response.status !== 404) {
-      const message = await response.text();
-      throw new Error(message || 'Failed to launch campaign.');
-    }
   } catch (error) {
     if (
       error instanceof Error &&
