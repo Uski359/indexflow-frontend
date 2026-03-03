@@ -5,8 +5,7 @@ import {
   saveCampaignAllocations
 } from './storage';
 import {
-  computeAllocationPlan,
-  generatePreviewParticipants
+  computeAllocationPlan
 } from './preview';
 import type {
   CampaignDraft,
@@ -33,10 +32,12 @@ export const launchCampaign = async (
   options?: LaunchCampaignOptions
 ): Promise<CampaignLaunchResult> => {
   const config = launchableCampaignDraftSchema.parse(draft);
-  const participantPool =
-    options?.participants && options.participants.length > 0
-      ? options.participants
-      : generatePreviewParticipants(200);
+  const participantPool = options?.participants ?? [];
+
+  if (participantPool.length === 0) {
+    throw new Error('No participants provided.');
+  }
+
   const { allocations, preview } = computeAllocationPlan(config, participantPool, {
     supportsProofUsageFilter: options?.supportsProofUsageFilter ?? false
   });

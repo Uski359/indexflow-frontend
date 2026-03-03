@@ -3,7 +3,7 @@
 import classNames from 'classnames';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useAccount } from 'wagmi';
 
 import EmptyState from '@/components/ui/EmptyState';
@@ -12,16 +12,23 @@ import LoadingSkeleton from '@/components/ui/LoadingSkeleton';
 import SectionCard from '@/components/ui/SectionCard';
 
 import { computeAllocationPreview } from './preview';
+import {
+  parseParticipantsFromCsv,
+  parseParticipantsFromText,
+  type MissingScoreHandling
+} from './participants';
 import { useCampaignLaunch } from './hooks';
 import { toDateInputValue, toIsoDate } from './storage';
 import type {
   CampaignChecklistItem,
   CampaignChecklistStatus,
+  CampaignPreviewParticipant,
   LaunchYourCampaignCardProps
 } from './types';
 
-type ConfigSection = 'basics' | 'allocation' | 'eligibility';
+type ConfigSection = 'basics' | 'allocation' | 'eligibility' | 'participants';
 type FeedbackTone = 'neutral' | 'success' | 'danger';
+type ParticipantInputMode = 'paste' | 'csv';
 
 const statusClassNames: Record<CampaignChecklistStatus, string> = {
   complete: 'bg-emerald-500/10 text-emerald-200',
@@ -38,7 +45,8 @@ const feedbackClassNames: Record<FeedbackTone, string> = {
 const sectionOptions: Array<{ key: ConfigSection; label: string }> = [
   { key: 'basics', label: 'Basics' },
   { key: 'allocation', label: 'Allocation' },
-  { key: 'eligibility', label: 'Eligibility' }
+  { key: 'eligibility', label: 'Eligibility' },
+  { key: 'participants', label: 'Participants' }
 ];
 
 const formatAmount = (value: number): string =>
@@ -55,6 +63,12 @@ const formatPercent = (value: number): string =>
     minimumFractionDigits: value < 10 ? 1 : 0,
     maximumFractionDigits: 1
   })}%`;
+
+const importedParticipantDefaults = {
+  walletAgeDays: 3650,
+  activeDaysLast14: 14,
+  proofUsageEvents: 999999
+} as const;
 
 const StatusBadge = ({
   status,
@@ -114,13 +128,41 @@ const ReviewRow = ({
 };
 
 const LaunchYourCampaignCard = ({
-  participants,
   supportsProofUsageFilter = false
 }: LaunchYourCampaignCardProps) => {
   const { isConnected } = useAccount();
   const router = useRouter();
   const cardRef = useRef<HTMLDivElement>(null);
   const [activeSection, setActiveSection] = useState<ConfigSection>('basics');
+  const [participantInputMode, setParticipantInputMode] =
+    useState<ParticipantInputMode>('paste');
+  const [participantText, setParticipantText] = useState('');
+  const [participantCsvText, setParticipantCsvText] = useState('');
+  const [participantCsvName, setParticipantCsvName] = useState<string | null>(null);
+  const [participantCsvError, setParticipantCsvError] = useState<string | null>(null);
+  const [missingScoreHandling, setMissingScoreHandling] =
+    useState<MissingScoreHandling>('require');
+  const parsedParticipants = useMemo(
+    () =>
+      participantInputMode === 'paste'
+        ? parseParticipantsFromText(participantText)
+        : parseParticipantsFromCsv(participantCsvText),
+    [participantCsvText, participantInputMode, participantText]
+  );
+  const allocationParticipants = useMemo<CampaignPreviewParticipant[]>(() => {
+    const rows =
+      missingScoreHandling === 'zero'
+        ? parsedParticipants.rows
+        : parsedParticipants.rows.filter((row) => typeof row.score === 'number');
+
+    return rows.map((row) => ({
+      wallet: row.address,
+      score: row.score ?? 0,
+      walletAgeDays: importedParticipantDefaults.walletAgeDays,
+      activeDaysLast14: importedParticipantDefaults.activeDaysLast14,
+      proofUsageEvents: importedParticipantDefaults.proofUsageEvents
+    }));
+  }, [missingScoreHandling, parsedParticipants.rows]);
   const {
     draft,
     hasStoredDraft,
@@ -137,9 +179,10 @@ const LaunchYourCampaignCard = ({
     launch,
     retryLoad
   } = useCampaignLaunch({
-    participants,
+    participants: allocationParticipants,
     supportsProofUsageFilter
   });
+  const isDev = process.env.NODE_ENV !== 'production';
 
   useEffect(() => {
     if (window.location.hash === '#launch-your-campaign') {
@@ -149,11 +192,46 @@ const LaunchYourCampaignCard = ({
 
   const preview = useMemo(
     () =>
-      computeAllocationPreview(draft, participants, {
+      computeAllocationPreview(draft, allocationParticipants, {
         supportsProofUsageFilter
       }),
-    [draft, participants, supportsProofUsageFilter]
+    [allocationParticipants, draft, supportsProofUsageFilter]
   );
+  const scoreRequired =
+    draft.transform === 'linear' ||
+    draft.transform === 'sqrt' ||
+    draft.transform === 'log';
+  const missingScoresFound = parsedParticipants.stats.missingScoreCount > 0;
+  const hasInvalidAddresses = parsedParticipants.errors.some((error) =>
+    error.includes('invalid EVM address')
+  );
+  const requiresMissingScoreResolution =
+    scoreRequired && missingScoresFound && missingScoreHandling === 'require';
+  const launchBlockers = useMemo(() => {
+    const blockers: string[] = [];
+
+    if (allocationParticipants.length === 0) {
+      blockers.push('No participants provided');
+    }
+
+    if (hasInvalidAddresses) {
+      blockers.push('Invalid addresses present');
+    }
+
+    if (requiresMissingScoreResolution) {
+      blockers.push('Weighted mode requires scores (missing scores found)');
+    }
+
+    return blockers;
+  }, [
+    allocationParticipants.length,
+    hasInvalidAddresses,
+    requiresMissingScoreResolution
+  ]);
+  const participantsReady =
+    allocationParticipants.length > 0 &&
+    !hasInvalidAddresses &&
+    !requiresMissingScoreResolution;
 
   const basicsReady =
     draft.name.trim().length >= 3 &&
@@ -167,13 +245,14 @@ const LaunchYourCampaignCard = ({
     draft.minPerWallet <= draft.maxPerWallet;
   const eligibilityReady = draft.minScore > 0;
   const reviewConfirmed = draft.termsAccepted;
-  const previewReady = preview.computedSuccessfully && preview.eligibleCount > 0;
+  const previewReady =
+    preview.computedSuccessfully && preview.eligibleCount > 0 && launchBlockers.length === 0;
 
   const checklist = useMemo<CampaignChecklistItem[]>(() => {
     const connectStatus: CampaignChecklistStatus = isConnected ? 'complete' : 'current';
     const typeStatus: CampaignChecklistStatus = draft.type ? 'complete' : 'pending';
     const configurationStatus: CampaignChecklistStatus =
-      basicsReady && allocationReady && eligibilityReady
+      basicsReady && allocationReady && eligibilityReady && participantsReady
         ? 'complete'
         : 'current';
     const reviewStatus: CampaignChecklistStatus =
@@ -198,8 +277,8 @@ const LaunchYourCampaignCard = ({
         label: 'Configure params',
         status: configurationStatus,
         helper:
-          basicsReady && allocationReady && eligibilityReady
-            ? 'Basics, allocation, and eligibility are configured'
+          basicsReady && allocationReady && eligibilityReady && participantsReady
+            ? 'Basics, allocation, eligibility, and participants are configured'
             : 'Complete the setup tabs'
       },
       {
@@ -221,7 +300,10 @@ const LaunchYourCampaignCard = ({
     basicsReady,
     draft.type,
     eligibilityReady,
+    isConnected,
     isDraftLaunchable,
+    participantsReady,
+    preview.computedSuccessfully,
     previewReady,
     reviewConfirmed
   ]);
@@ -239,6 +321,14 @@ const LaunchYourCampaignCard = ({
         complete: draft.minScore > 0
       },
       {
+        label: 'Participants loaded',
+        helper:
+          allocationParticipants.length > 0
+            ? `${formatCompact(allocationParticipants.length)} participants are ready for allocation.`
+            : 'Paste wallets or upload a CSV before launching.',
+        complete: participantsReady
+      },
+      {
         label: 'Preview computed successfully',
         helper:
           preview.eligibleCount > 0
@@ -253,9 +343,11 @@ const LaunchYourCampaignCard = ({
       }
     ],
     [
+      allocationParticipants.length,
       draft.maxPerWallet,
       draft.minScore,
       draft.termsAccepted,
+      participantsReady,
       preview.eligibleCount,
       previewReady,
       preview.effectiveMaxPerWallet,
@@ -264,7 +356,7 @@ const LaunchYourCampaignCard = ({
   );
 
   const reviewReady = reviewChecks.every((item) => item.complete);
-  const canSubmit = isDraftLaunchable && reviewReady;
+  const canSubmit = isDraftLaunchable && reviewReady && launchBlockers.length === 0;
   const showEmptyState = !hasStoredDraft && draft.name.trim().length === 0;
 
   const summaryCards = [
@@ -289,6 +381,34 @@ const LaunchYourCampaignCard = ({
       helper: `Includes ${formatPercent(draft.maxSharePercent)} share cap`
     }
   ];
+
+  const participantErrorsPreview = parsedParticipants.errors.slice(0, 5);
+
+  const handleParticipantCsvUpload = async (
+    event: ChangeEvent<HTMLInputElement>
+  ): Promise<void> => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      setParticipantCsvText('');
+      setParticipantCsvName(null);
+      setParticipantCsvError(null);
+      return;
+    }
+
+    try {
+      const nextText = await file.text();
+      setParticipantCsvText(nextText);
+      setParticipantCsvName(file.name);
+      setParticipantCsvError(null);
+    } catch {
+      setParticipantCsvText('');
+      setParticipantCsvName(file.name);
+      setParticipantCsvError('Failed to read CSV file.');
+    } finally {
+      event.target.value = '';
+    }
+  };
 
   return (
     <div
@@ -694,6 +814,197 @@ const LaunchYourCampaignCard = ({
                   ) : null}
                 </div>
               ) : null}
+
+              {activeSection === 'participants' ? (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-slate-200">Participant source</p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        Paste one address per line or upload a CSV with optional scores.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setParticipantInputMode('paste')}
+                        className={classNames(
+                          'rounded-full px-3 py-1.5 text-xs font-medium transition',
+                          participantInputMode === 'paste'
+                            ? 'bg-white text-slate-950'
+                            : 'border border-white/10 text-slate-300 hover:border-white/20 hover:bg-white/5'
+                        )}
+                      >
+                        Paste
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setParticipantInputMode('csv')}
+                        className={classNames(
+                          'rounded-full px-3 py-1.5 text-xs font-medium transition',
+                          participantInputMode === 'csv'
+                            ? 'bg-white text-slate-950'
+                            : 'border border-white/10 text-slate-300 hover:border-white/20 hover:bg-white/5'
+                        )}
+                      >
+                        Upload CSV
+                      </button>
+                    </div>
+                  </div>
+
+                  {participantInputMode === 'paste' ? (
+                    <div className="space-y-2">
+                      <label
+                        htmlFor="participant-paste-input"
+                        className="text-sm font-medium text-slate-200"
+                      >
+                        Wallet list
+                      </label>
+                      <textarea
+                        id="participant-paste-input"
+                        value={participantText}
+                        onChange={(event) => setParticipantText(event.target.value)}
+                        placeholder={`0xabc...\n0xdef...,87`}
+                        rows={8}
+                        className="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/30"
+                      />
+                      <p className="text-xs text-slate-400">
+                        Supported formats: one address per line, or CSV rows in
+                        <span className="font-mono text-slate-300"> address,score </span>
+                        format. Headers are optional.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <label
+                        htmlFor="participant-csv-upload"
+                        className="text-sm font-medium text-slate-200"
+                      >
+                        CSV file
+                      </label>
+                      <input
+                        id="participant-csv-upload"
+                        type="file"
+                        accept=".csv,text/csv"
+                        onChange={(event) => {
+                          void handleParticipantCsvUpload(event);
+                        }}
+                        className="block w-full rounded-2xl border border-dashed border-white/10 bg-black/20 px-3 py-2.5 text-sm text-slate-300 file:mr-3 file:rounded-full file:border-0 file:bg-white file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-slate-950"
+                      />
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/5 bg-background/50 px-4 py-3 text-xs text-slate-300">
+                        <span>{participantCsvName ?? 'No CSV selected.'}</span>
+                        {participantCsvName ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setParticipantCsvText('');
+                              setParticipantCsvName(null);
+                              setParticipantCsvError(null);
+                            }}
+                            className="rounded-full border border-white/10 px-3 py-1 font-medium text-slate-300 transition hover:border-white/20 hover:bg-white/5"
+                          >
+                            Clear file
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                    <MetricCard
+                      label="Valid"
+                      value={formatCompact(parsedParticipants.stats.validCount)}
+                      helper="Unique normalized wallets"
+                    />
+                    <MetricCard
+                      label="Invalid"
+                      value={formatCompact(parsedParticipants.stats.invalidCount)}
+                      helper="Rows blocked by parsing"
+                    />
+                    <MetricCard
+                      label="Duplicates"
+                      value={formatCompact(parsedParticipants.stats.duplicateCount)}
+                      helper="Duplicate wallets removed"
+                    />
+                    <MetricCard
+                      label="Score coverage"
+                      value={formatPercent(parsedParticipants.stats.scoreCoveragePercent)}
+                      helper={`${formatCompact(parsedParticipants.stats.rowsWithScore)} rows with scores`}
+                    />
+                    <MetricCard
+                      label="Usable"
+                      value={formatCompact(allocationParticipants.length)}
+                      helper="Rows used for preview + launch"
+                    />
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <div className="space-y-3 rounded-2xl border border-white/5 bg-background/50 p-4">
+                      <div>
+                        <p className="text-sm font-medium text-white">Missing score handling</p>
+                        <p className="mt-1 text-xs text-slate-400">
+                          Weighted allocation requires scores unless you choose a fallback.
+                        </p>
+                      </div>
+                      <select
+                        value={missingScoreHandling}
+                        onChange={(event) =>
+                          setMissingScoreHandling(
+                            event.target.value as MissingScoreHandling
+                          )
+                        }
+                        className="w-full rounded-2xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/30"
+                      >
+                        <option value="require">Require scores (default)</option>
+                        <option value="zero">Treat missing as 0</option>
+                        <option value="reject">Reject rows without scores</option>
+                      </select>
+                      <p className="text-xs text-slate-300">
+                        {missingScoreHandling === 'require'
+                          ? 'Missing scores will block launch until every row has a score or you choose a fallback.'
+                          : missingScoreHandling === 'zero'
+                            ? 'Rows without scores stay in the dataset with a score of 0.'
+                            : 'Rows without scores are excluded from preview, allocation, and launch.'}
+                      </p>
+                    </div>
+
+                    <div className="space-y-3 rounded-2xl border border-white/5 bg-background/50 p-4">
+                      <div>
+                        <p className="text-sm font-medium text-white">Parser output</p>
+                        <p className="mt-1 text-xs text-slate-400">
+                          Invalid rows are excluded automatically.
+                        </p>
+                      </div>
+                      {participantCsvError ? (
+                        <p className="text-sm text-rose-200">{participantCsvError}</p>
+                      ) : participantErrorsPreview.length > 0 ? (
+                        <div className="space-y-2 text-xs text-rose-100">
+                          {participantErrorsPreview.map((error) => (
+                            <div
+                              key={error}
+                              className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-3 py-2"
+                            >
+                              {error}
+                            </div>
+                          ))}
+                          {parsedParticipants.errors.length > participantErrorsPreview.length ? (
+                            <p className="text-slate-400">
+                              +{parsedParticipants.errors.length - participantErrorsPreview.length}{' '}
+                              more parse errors
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-300">
+                          Parser is ready. Imported participants use pass-through defaults for
+                          wallet age, activity, and proof usage so allocation preview stays driven
+                          by the supplied addresses and scores.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="space-y-3">
@@ -705,7 +1016,7 @@ const LaunchYourCampaignCard = ({
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
-                {reviewChecks.slice(0, 3).map((item) => (
+                {reviewChecks.slice(0, reviewChecks.length - 1).map((item) => (
                   <ReviewRow
                     key={item.label}
                     label={item.label}
@@ -723,20 +1034,53 @@ const LaunchYourCampaignCard = ({
                   className="mt-1 h-4 w-4 rounded border-white/20 bg-transparent text-accent focus:ring-accent"
                 />
                 <span className="text-sm leading-6 text-slate-300">
-                  I confirm the allocation caps, eligibility filters, and preview estimate before
-                  launching.
+                  I confirm the allocation caps, eligibility filters, and participant preview
+                  before launching.
                 </span>
               </label>
 
               <ReviewRow
-                label={reviewChecks[3].label}
-                helper={reviewChecks[3].helper}
-                complete={reviewChecks[3].complete}
+                label={reviewChecks[reviewChecks.length - 1].label}
+                helper={reviewChecks[reviewChecks.length - 1].helper}
+                complete={reviewChecks[reviewChecks.length - 1].complete}
               />
             </div>
 
+            {isDev ? (
+              <div className="rounded-2xl border border-sky-500/20 bg-sky-500/5 p-4 text-sm text-sky-100">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-200">
+                    Dev panel
+                  </p>
+                  <span className="text-xs text-sky-200/80">
+                    {launchBlockers.length === 0
+                      ? 'No launch blockers'
+                      : `${launchBlockers.length} blocker${launchBlockers.length === 1 ? '' : 's'}`}
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-2 text-xs">
+                  {launchBlockers.length === 0 ? (
+                    <div className="rounded-2xl border border-sky-500/10 bg-sky-500/10 px-3 py-2 text-sky-100">
+                      Participant parsing and launch gating are clear.
+                    </div>
+                  ) : (
+                    launchBlockers.map((blocker) => (
+                      <div
+                        key={blocker}
+                        className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-rose-100"
+                      >
+                        {blocker}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            ) : null}
+
             {draftValidationMessage ? (
               <p className="text-sm text-amber-200">{draftValidationMessage}</p>
+            ) : launchBlockers.length > 0 ? (
+              <p className="text-sm text-amber-200">{launchBlockers[0]}</p>
             ) : null}
 
             {feedback ? (

@@ -12,6 +12,8 @@ type ComputePreviewOptions = {
   supportsProofUsageFilter?: boolean;
 };
 
+const PARTICIPANT_PREVIEW_LABEL = 'Participant preview';
+
 const clamp = (value: number, min: number, max: number): number => {
   return Math.min(Math.max(value, min), max);
 };
@@ -65,26 +67,8 @@ const formatPreview = (
     effectiveMaxPerWallet,
     computedSuccessfully: true,
     isEstimated,
-    previewLabel: isEstimated ? 'Preview estimate' : 'Live participant preview'
+    previewLabel: PARTICIPANT_PREVIEW_LABEL
   };
-};
-
-export const generatePreviewParticipants = (count = 1000): CampaignPreviewParticipant[] => {
-  return Array.from({ length: count }, (_, index) => {
-    const rank = count - index;
-    const score = Math.max(5, Math.round(Math.pow(rank, 0.72) * 6 + (index % 11)));
-    const walletAgeDays = 20 + ((index * 17) % 900);
-    const activeDaysLast14 = Math.min(14, Math.max(1, Math.round(score / 20) + (index % 4)));
-    const proofUsageEvents = Math.max(1, Math.round(score * 0.55) + (index % 6));
-
-    return {
-      wallet: `0x${String(index + 1).padStart(40, '0')}`,
-      score,
-      walletAgeDays,
-      activeDaysLast14,
-      proofUsageEvents
-    };
-  });
 };
 
 const filterEligibleParticipants = (
@@ -131,11 +115,8 @@ export const computeAllocationPlan = (
   options?: ComputePreviewOptions
 ): CampaignAllocationComputation => {
   const supportsProofUsageFilter = options?.supportsProofUsageFilter ?? false;
-  const hasLiveParticipants = Boolean(sampleParticipants?.length);
-  const sourceParticipants =
-    sampleParticipants && sampleParticipants.length > 0
-      ? sampleParticipants
-      : generatePreviewParticipants();
+  const sourceParticipants = sampleParticipants ?? [];
+  const hasLiveParticipants = sourceParticipants.length > 0;
 
   if (
     config.budget <= 0 ||
@@ -155,8 +136,27 @@ export const computeAllocationPlan = (
         budgetUtilizationPercent: 0,
         effectiveMaxPerWallet: Math.max(config.maxPerWallet, 0),
         computedSuccessfully: false,
-        isEstimated: !hasLiveParticipants,
-        previewLabel: hasLiveParticipants ? 'Live participant preview' : 'Preview estimate'
+        isEstimated: false,
+        previewLabel: PARTICIPANT_PREVIEW_LABEL
+      }
+    };
+  }
+
+  if (!hasLiveParticipants) {
+    return {
+      allocations: [],
+      participants: [],
+      preview: {
+        eligibleCount: 0,
+        estAvg: 0,
+        estMinAfterCap: 0,
+        estMaxAfterCap: 0,
+        top10SharePercent: 0,
+        budgetUtilizationPercent: 0,
+        effectiveMaxPerWallet: Math.max(config.maxPerWallet, 0),
+        computedSuccessfully: true,
+        isEstimated: false,
+        previewLabel: PARTICIPANT_PREVIEW_LABEL
       }
     };
   }
@@ -180,8 +180,8 @@ export const computeAllocationPlan = (
         budgetUtilizationPercent: 0,
         effectiveMaxPerWallet: Math.max(config.maxPerWallet, 0),
         computedSuccessfully: true,
-        isEstimated: !hasLiveParticipants,
-        previewLabel: hasLiveParticipants ? 'Live participant preview' : 'Preview estimate'
+        isEstimated: false,
+        previewLabel: PARTICIPANT_PREVIEW_LABEL
       }
     };
   }
@@ -213,8 +213,8 @@ export const computeAllocationPlan = (
         budgetUtilizationPercent: 0,
         effectiveMaxPerWallet: upperBound,
         computedSuccessfully: false,
-        isEstimated: !hasLiveParticipants,
-        previewLabel: hasLiveParticipants ? 'Live participant preview' : 'Preview estimate'
+        isEstimated: false,
+        previewLabel: PARTICIPANT_PREVIEW_LABEL
       }
     };
   }
@@ -254,6 +254,6 @@ export const computeAllocationPlan = (
   return {
     allocations,
     participants: eligibleParticipants,
-    preview: formatPreview(allocations, config.budget, upperBound, !hasLiveParticipants)
+    preview: formatPreview(allocations, config.budget, upperBound, false)
   };
 };
