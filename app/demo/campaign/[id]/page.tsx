@@ -423,6 +423,12 @@ const DemoCampaignPage = () => {
         subtitle={`Window: ${windowType} | Mock mode`}
         actions={
           <>
+            <Link
+              href="/campaigns"
+              className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-slate-200"
+            >
+              View campaigns
+            </Link>
             <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.2em] text-slate-400">
               Base URL: {baseUrl ?? 'Not set'}
             </div>

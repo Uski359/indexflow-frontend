@@ -1,6 +1,7 @@
 export type FeatureKey =
   | 'overview'
   | 'proof'
+  | 'campaignsIndex'
   | 'dashboardLegacy'
   | 'transfers'
   | 'health'
@@ -23,6 +24,7 @@ export type FeatureRoute = {
 export const featureToggles: Record<FeatureKey, boolean> = {
   overview: true,
   proof: true,
+  campaignsIndex: true,
   dashboardLegacy: false,
   transfers: false,
   health: false,
@@ -56,6 +58,14 @@ const routeRegistry: FeatureRoute[] = [
     description: 'Primary campaign review flow',
     showInNav: true,
     matchMode: 'exact'
+  },
+  {
+    key: 'campaignsIndex',
+    href: '/campaigns',
+    label: 'Campaigns',
+    description: 'Stored campaign registry and detail views',
+    showInNav: true,
+    matchMode: 'prefix'
   },
   {
     key: 'dashboardLegacy',

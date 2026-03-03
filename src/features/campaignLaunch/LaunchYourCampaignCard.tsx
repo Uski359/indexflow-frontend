@@ -2,6 +2,7 @@
 
 import classNames from 'classnames';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAccount } from 'wagmi';
 
@@ -117,6 +118,7 @@ const LaunchYourCampaignCard = ({
   supportsProofUsageFilter = false
 }: LaunchYourCampaignCardProps) => {
   const { isConnected } = useAccount();
+  const router = useRouter();
   const cardRef = useRef<HTMLDivElement>(null);
   const [activeSection, setActiveSection] = useState<ConfigSection>('basics');
   const {
@@ -134,7 +136,10 @@ const LaunchYourCampaignCard = ({
     saveDraft,
     launch,
     retryLoad
-  } = useCampaignLaunch();
+  } = useCampaignLaunch({
+    participants,
+    supportsProofUsageFilter
+  });
 
   useEffect(() => {
     if (window.location.hash === '#launch-your-campaign') {
@@ -762,7 +767,14 @@ const LaunchYourCampaignCard = ({
               <button
                 type="button"
                 onClick={() => {
-                  void launch();
+                  void (async () => {
+                    try {
+                      const result = await launch();
+                      router.push(`/campaigns/${result.campaignId}`);
+                    } catch {
+                      // The hook already exposes feedback for launch errors.
+                    }
+                  })();
                 }}
                 disabled={!canSubmit || isLaunching}
                 className="inline-flex items-center justify-center rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:bg-white/30 disabled:text-slate-500"

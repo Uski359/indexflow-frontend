@@ -3,9 +3,11 @@ import {
   deserializeCampaignDraft,
   serializeCampaignDraft
 } from './schema';
-import type { CampaignDraft } from './types';
+import type { CampaignAllocation, CampaignDraft, CampaignRecord } from './types';
 
 export const CAMPAIGN_DRAFT_STORAGE_KEY = 'iflw_campaign_draft_v1';
+export const CAMPAIGNS_STORAGE_KEY = 'iflw_campaigns_v1';
+export const CAMPAIGN_ALLOCATIONS_STORAGE_KEY = 'iflw_campaign_allocations_v1';
 
 const getStorage = (): Storage | null => {
   if (typeof window === 'undefined') {
@@ -100,4 +102,72 @@ export const saveCampaignDraft = async (draft: CampaignDraft): Promise<CampaignD
   storage?.setItem(CAMPAIGN_DRAFT_STORAGE_KEY, serializeCampaignDraft(parsed));
 
   return parsed;
+};
+
+const parseJson = <T>(value: string | null, fallback: T): T => {
+  if (!value) {
+    return fallback;
+  }
+
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+};
+
+export const loadCampaigns = (): CampaignRecord[] => {
+  const storage = getStorage();
+  const campaigns = parseJson<CampaignRecord[]>(storage?.getItem(CAMPAIGNS_STORAGE_KEY) ?? null, []);
+
+  return Array.isArray(campaigns)
+    ? [...campaigns].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    : [];
+};
+
+export const saveCampaigns = (campaigns: CampaignRecord[]): void => {
+  const storage = getStorage();
+  storage?.setItem(CAMPAIGNS_STORAGE_KEY, JSON.stringify(campaigns));
+};
+
+export const appendCampaign = (campaign: CampaignRecord): void => {
+  const campaigns = loadCampaigns();
+  saveCampaigns([campaign, ...campaigns.filter((entry) => entry.id !== campaign.id)]);
+};
+
+export const loadCampaignById = (campaignId: string): CampaignRecord | null => {
+  return loadCampaigns().find((campaign) => campaign.id === campaignId) ?? null;
+};
+
+export const loadCampaignAllocationsMap = (): Record<string, CampaignAllocation[]> => {
+  const storage = getStorage();
+  const allocationsMap = parseJson<Record<string, CampaignAllocation[]>>(
+    storage?.getItem(CAMPAIGN_ALLOCATIONS_STORAGE_KEY) ?? null,
+    {}
+  );
+
+  return allocationsMap && typeof allocationsMap === 'object' ? allocationsMap : {};
+};
+
+export const saveCampaignAllocationsMap = (
+  allocationsMap: Record<string, CampaignAllocation[]>
+): void => {
+  const storage = getStorage();
+  storage?.setItem(CAMPAIGN_ALLOCATIONS_STORAGE_KEY, JSON.stringify(allocationsMap));
+};
+
+export const saveCampaignAllocations = (
+  campaignId: string,
+  allocations: CampaignAllocation[]
+): void => {
+  const allocationsMap = loadCampaignAllocationsMap();
+  allocationsMap[campaignId] = allocations;
+  saveCampaignAllocationsMap(allocationsMap);
+};
+
+export const loadCampaignAllocations = (campaignId: string): CampaignAllocation[] => {
+  const allocationsMap = loadCampaignAllocationsMap();
+  const allocations = allocationsMap[campaignId];
+
+  return Array.isArray(allocations) ? allocations : [];
 };

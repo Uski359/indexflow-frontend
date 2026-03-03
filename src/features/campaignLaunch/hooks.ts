@@ -3,7 +3,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { launchCampaign } from './api';
+import { launchCampaign } from './launch';
 import { campaignDraftSchema, launchableCampaignDraftSchema } from './schema';
 import {
   clearCampaignDraft,
@@ -11,7 +11,11 @@ import {
   loadCampaignDraft,
   saveCampaignDraft
 } from './storage';
-import type { CampaignDraft, CampaignLaunchResult } from './types';
+import type {
+  CampaignDraft,
+  CampaignLaunchResult,
+  CampaignPreviewParticipant
+} from './types';
 
 type FeedbackTone = 'neutral' | 'success' | 'danger';
 
@@ -33,13 +37,20 @@ type UseCampaignLaunchResult = {
   launchResult: CampaignLaunchResult | null;
   updateDraft: <Key extends keyof CampaignDraft>(key: Key, value: CampaignDraft[Key]) => void;
   saveDraft: () => Promise<void>;
-  launch: () => Promise<void>;
+  launch: () => Promise<CampaignLaunchResult>;
   retryLoad: () => Promise<void>;
 };
 
 const campaignDraftQueryKey = ['campaign-launch', 'draft'];
 
-export const useCampaignLaunch = (): UseCampaignLaunchResult => {
+type UseCampaignLaunchOptions = {
+  participants?: CampaignPreviewParticipant[];
+  supportsProofUsageFilter?: boolean;
+};
+
+export const useCampaignLaunch = (
+  options: UseCampaignLaunchOptions = {}
+): UseCampaignLaunchResult => {
   const [draft, setDraft] = useState<CampaignDraft>(createDefaultCampaignDraft);
   const [hasStoredDraft, setHasStoredDraft] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackState>(null);
@@ -96,11 +107,15 @@ export const useCampaignLaunch = (): UseCampaignLaunchResult => {
   });
 
   const launchMutation = useMutation({
-    mutationFn: launchCampaign,
+    mutationFn: (nextDraft: CampaignDraft) =>
+      launchCampaign(nextDraft, {
+        participants: options.participants,
+        supportsProofUsageFilter: options.supportsProofUsageFilter
+      }),
     onSuccess: (result) => {
       setLaunchResult(result);
       setFeedback({
-        tone: result.mode === 'api' ? 'success' : 'neutral',
+        tone: result.mode === 'api' || result.mode === 'local' ? 'success' : 'neutral',
         message: `${result.message} (${result.campaignId})`
       });
     },
@@ -135,7 +150,8 @@ export const useCampaignLaunch = (): UseCampaignLaunchResult => {
   }, [draft, saveMutation]);
 
   const launchAction = useCallback(async () => {
-    await launchMutation.mutateAsync(draft);
+    const result = await launchMutation.mutateAsync(draft);
+    return result;
   }, [draft, launchMutation]);
 
   const retryLoad = useCallback(async () => {

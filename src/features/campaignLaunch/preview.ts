@@ -1,5 +1,7 @@
 import type {
   AllocationTransform,
+  CampaignAllocation,
+  CampaignAllocationComputation,
   CampaignAllocationPreview,
   CampaignDraft,
   CampaignPreviewParticipant,
@@ -39,23 +41,27 @@ const transformScore = (score: number, transform: AllocationTransform): number =
 };
 
 const formatPreview = (
-  allocations: number[],
+  allocations: CampaignAllocation[],
   budget: number,
   effectiveMaxPerWallet: number,
   isEstimated: boolean
 ): CampaignAllocationPreview => {
-  const distributedTotal = allocations.reduce((sum, allocation) => sum + allocation, 0);
+  const values = allocations.map((allocation) => allocation.amount);
+  const distributedTotal = values.reduce((sum, allocation) => sum + allocation, 0);
   const eligibleCount = allocations.length;
-  const sortedAllocations = [...allocations].sort((a, b) => b - a);
-  const topTenTotal = sortedAllocations.slice(0, 10).reduce((sum, allocation) => sum + allocation, 0);
+  const sortedAllocations = [...values].sort((a, b) => b - a);
+  const topTenTotal = sortedAllocations
+    .slice(0, 10)
+    .reduce((sum, allocation) => sum + allocation, 0);
 
   return {
     eligibleCount,
     estAvg: eligibleCount > 0 ? distributedTotal / eligibleCount : 0,
-    estMinAfterCap: eligibleCount > 0 ? Math.min(...allocations) : 0,
-    estMaxAfterCap: eligibleCount > 0 ? Math.max(...allocations) : 0,
+    estMinAfterCap: eligibleCount > 0 ? Math.min(...values) : 0,
+    estMaxAfterCap: eligibleCount > 0 ? Math.max(...values) : 0,
     top10SharePercent: distributedTotal > 0 ? (topTenTotal / distributedTotal) * 100 : 0,
-    budgetUtilizationPercent: budget > 0 ? (Math.min(distributedTotal, budget) / budget) * 100 : 0,
+    budgetUtilizationPercent:
+      budget > 0 ? (Math.min(distributedTotal, budget) / budget) * 100 : 0,
     effectiveMaxPerWallet,
     computedSuccessfully: true,
     isEstimated,
@@ -116,6 +122,14 @@ export const computeAllocationPreview = (
   sampleParticipants?: CampaignPreviewParticipant[],
   options?: ComputePreviewOptions
 ): CampaignAllocationPreview => {
+  return computeAllocationPlan(config, sampleParticipants, options).preview;
+};
+
+export const computeAllocationPlan = (
+  config: CampaignDraft,
+  sampleParticipants?: CampaignPreviewParticipant[],
+  options?: ComputePreviewOptions
+): CampaignAllocationComputation => {
   const supportsProofUsageFilter = options?.supportsProofUsageFilter ?? false;
   const hasLiveParticipants = Boolean(sampleParticipants?.length);
   const sourceParticipants =
@@ -130,16 +144,20 @@ export const computeAllocationPreview = (
     config.minPerWallet > config.maxPerWallet
   ) {
     return {
-      eligibleCount: 0,
-      estAvg: 0,
-      estMinAfterCap: 0,
-      estMaxAfterCap: 0,
-      top10SharePercent: 0,
-      budgetUtilizationPercent: 0,
-      effectiveMaxPerWallet: Math.max(config.maxPerWallet, 0),
-      computedSuccessfully: false,
-      isEstimated: !hasLiveParticipants,
-      previewLabel: hasLiveParticipants ? 'Live participant preview' : 'Preview estimate'
+      allocations: [],
+      participants: [],
+      preview: {
+        eligibleCount: 0,
+        estAvg: 0,
+        estMinAfterCap: 0,
+        estMaxAfterCap: 0,
+        top10SharePercent: 0,
+        budgetUtilizationPercent: 0,
+        effectiveMaxPerWallet: Math.max(config.maxPerWallet, 0),
+        computedSuccessfully: false,
+        isEstimated: !hasLiveParticipants,
+        previewLabel: hasLiveParticipants ? 'Live participant preview' : 'Preview estimate'
+      }
     };
   }
 
@@ -151,16 +169,20 @@ export const computeAllocationPreview = (
 
   if (eligibleParticipants.length === 0) {
     return {
-      eligibleCount: 0,
-      estAvg: 0,
-      estMinAfterCap: 0,
-      estMaxAfterCap: 0,
-      top10SharePercent: 0,
-      budgetUtilizationPercent: 0,
-      effectiveMaxPerWallet: Math.max(config.maxPerWallet, 0),
-      computedSuccessfully: true,
-      isEstimated: !hasLiveParticipants,
-      previewLabel: hasLiveParticipants ? 'Live participant preview' : 'Preview estimate'
+      allocations: [],
+      participants: [],
+      preview: {
+        eligibleCount: 0,
+        estAvg: 0,
+        estMinAfterCap: 0,
+        estMaxAfterCap: 0,
+        top10SharePercent: 0,
+        budgetUtilizationPercent: 0,
+        effectiveMaxPerWallet: Math.max(config.maxPerWallet, 0),
+        computedSuccessfully: true,
+        isEstimated: !hasLiveParticipants,
+        previewLabel: hasLiveParticipants ? 'Live participant preview' : 'Preview estimate'
+      }
     };
   }
 
@@ -180,20 +202,24 @@ export const computeAllocationPreview = (
 
   if (totalWeight <= 0) {
     return {
-      eligibleCount: eligibleParticipants.length,
-      estAvg: 0,
-      estMinAfterCap: 0,
-      estMaxAfterCap: 0,
-      top10SharePercent: 0,
-      budgetUtilizationPercent: 0,
-      effectiveMaxPerWallet: upperBound,
-      computedSuccessfully: false,
-      isEstimated: !hasLiveParticipants,
-      previewLabel: hasLiveParticipants ? 'Live participant preview' : 'Preview estimate'
+      allocations: [],
+      participants: eligibleParticipants,
+      preview: {
+        eligibleCount: eligibleParticipants.length,
+        estAvg: 0,
+        estMinAfterCap: 0,
+        estMaxAfterCap: 0,
+        top10SharePercent: 0,
+        budgetUtilizationPercent: 0,
+        effectiveMaxPerWallet: upperBound,
+        computedSuccessfully: false,
+        isEstimated: !hasLiveParticipants,
+        previewLabel: hasLiveParticipants ? 'Live participant preview' : 'Preview estimate'
+      }
     };
   }
 
-  let allocations = eligibleParticipants.map((_, index) => {
+  let distributionValues = eligibleParticipants.map((_, index) => {
     const equalShare = equalPool / eligibleParticipants.length;
     const weightedShare = weightedPool * (transformedWeights[index] / totalWeight);
     const blended = equalShare + weightedShare;
@@ -201,13 +227,33 @@ export const computeAllocationPreview = (
     return roundAllocation(clamped, config.roundingRule);
   });
 
-  const preliminaryTotal = allocations.reduce((sum, allocation) => sum + allocation, 0);
+  const preliminaryTotal = distributionValues.reduce((sum, allocation) => sum + allocation, 0);
   if (preliminaryTotal > config.budget && preliminaryTotal > 0) {
     const scale = config.budget / preliminaryTotal;
-    allocations = allocations.map((allocation) =>
+    distributionValues = distributionValues.map((allocation) =>
       roundAllocation(allocation * scale, config.roundingRule)
     );
   }
 
-  return formatPreview(allocations, config.budget, upperBound, !hasLiveParticipants);
+  const distributedTotal = distributionValues.reduce((sum, allocation) => sum + allocation, 0);
+  const allocations = eligibleParticipants.map((participant, index) => {
+    const amount = distributionValues[index];
+    const sharePercent = distributedTotal > 0 ? (amount / distributedTotal) * 100 : 0;
+
+    return {
+      wallet: participant.wallet,
+      amount,
+      sharePercent,
+      score: participant.score,
+      walletAgeDays: participant.walletAgeDays,
+      activeDaysLast14: participant.activeDaysLast14,
+      proofUsageEvents: participant.proofUsageEvents
+    };
+  });
+
+  return {
+    allocations,
+    participants: eligibleParticipants,
+    preview: formatPreview(allocations, config.budget, upperBound, !hasLiveParticipants)
+  };
 };

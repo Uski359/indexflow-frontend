@@ -5,6 +5,7 @@ export const roundingRules = ['roundDown', 'roundNearest', 'none'] as const;
 export type CampaignType = (typeof campaignTypes)[number];
 export type AllocationTransform = (typeof allocationTransforms)[number];
 export type RoundingRule = (typeof roundingRules)[number];
+export type CampaignStatus = 'LIVE';
 
 export type CampaignDraft = {
   name: string;
@@ -26,7 +27,7 @@ export type CampaignDraft = {
 };
 
 export type CampaignLaunchResult = {
-  mode: 'api' | 'simulated';
+  mode: 'api' | 'simulated' | 'local';
   campaignId: string;
   message: string;
 };
@@ -47,6 +48,16 @@ export type CampaignPreviewParticipant = {
   proofUsageEvents?: number;
 };
 
+export type CampaignAllocation = {
+  wallet: string;
+  amount: number;
+  sharePercent: number;
+  score: number;
+  walletAgeDays: number;
+  activeDaysLast14: number;
+  proofUsageEvents?: number;
+};
+
 export type CampaignAllocationPreview = {
   eligibleCount: number;
   estAvg: number;
@@ -58,6 +69,21 @@ export type CampaignAllocationPreview = {
   computedSuccessfully: boolean;
   isEstimated: boolean;
   previewLabel: string;
+};
+
+export type CampaignAllocationComputation = {
+  allocations: CampaignAllocation[];
+  participants: CampaignPreviewParticipant[];
+  preview: CampaignAllocationPreview;
+};
+
+export type CampaignRecord = {
+  id: string;
+  status: CampaignStatus;
+  snapshotAt: string;
+  createdAt: string;
+  config: CampaignDraft;
+  preview: CampaignAllocationPreview;
 };
 
 export type LaunchYourCampaignCardProps = {
