@@ -5,6 +5,7 @@ import {
   saveCampaignAllocations
 } from './storage';
 import {
+  computeDecisionSummary,
   computeAllocationPlan
 } from './preview';
 import type {
@@ -41,6 +42,9 @@ export const launchCampaign = async (
   const { allocations, preview } = computeAllocationPlan(config, participantPool, {
     supportsProofUsageFilter: options?.supportsProofUsageFilter ?? false
   });
+  const decisionSummary = computeDecisionSummary(config, participantPool, {
+    supportsProofUsageFilter: options?.supportsProofUsageFilter ?? false
+  });
 
   if (!preview.computedSuccessfully || allocations.length === 0) {
     throw new Error('Unable to compute allocations for the current campaign settings.');
@@ -53,7 +57,8 @@ export const launchCampaign = async (
     snapshotAt: timestamp,
     createdAt: timestamp,
     config,
-    preview
+    preview,
+    decisionSummary
   };
 
   appendCampaign(campaign);

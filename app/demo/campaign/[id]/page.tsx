@@ -10,7 +10,16 @@ import LoadingSkeleton from '@/components/ui/LoadingSkeleton';
 import PageHeader from '@/components/ui/PageHeader';
 import { demoApiFetch, getDemoApiBaseUrl } from '@/lib/api';
 import LaunchYourCampaignCard from '@/src/features/campaignLaunch/LaunchYourCampaignCard';
-import type { CampaignPreviewParticipant } from '@/src/features/campaignLaunch/types';
+import {
+  computeAllocationPlan,
+  computeDecisionSummary
+} from '@/src/features/campaignLaunch/preview';
+import { createDefaultCampaignDraft } from '@/src/features/campaignLaunch/storage';
+import type {
+  AllocationTransform,
+  CampaignDraft,
+  CampaignPreviewParticipant
+} from '@/src/features/campaignLaunch/types';
 import type {
   CampaignCommentaryResponse,
   CampaignInsightsResponse,
@@ -50,6 +59,36 @@ const defaultFilters: FilterState = {
 const isWindowType = (value: string | null): value is WindowType => {
   return value === 'last_7_days' || value === 'last_14_days' || value === 'last_30_days';
 };
+
+const simulationTransformOptions: AllocationTransform[] = ['linear', 'sqrt', 'log'];
+
+const getClusterRiskLevel = (riskPercent: number): 'Low' | 'Medium' | 'High' => {
+  if (riskPercent >= 20) {
+    return 'High';
+  }
+  if (riskPercent >= 10) {
+    return 'Medium';
+  }
+  return 'Low';
+};
+
+const riskLevelClassName: Record<'Low' | 'Medium' | 'High', string> = {
+  Low: 'border-emerald-400/30 bg-emerald-500/10 text-emerald-100',
+  Medium: 'border-amber-400/30 bg-amber-500/10 text-amber-100',
+  High: 'border-rose-400/30 bg-rose-500/10 text-rose-100'
+};
+
+const formatPercent = (value: number): string =>
+  `${value.toLocaleString(undefined, {
+    minimumFractionDigits: value < 10 ? 1 : 0,
+    maximumFractionDigits: 1
+  })}%`;
+
+const formatAmount = (value: number): string =>
+  `${value.toLocaleString(undefined, {
+    minimumFractionDigits: value < 100 ? 2 : 0,
+    maximumFractionDigits: 2
+  })} IFLW`;
 
 const summarizeInsightResults = (
   results: WalletRowWithInsights[]
@@ -120,6 +159,23 @@ const DemoCampaignPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<FilterState>(defaultFilters);
+  const [simulationConfig, setSimulationConfig] = useState<CampaignDraft>(() => {
+    const draft = createDefaultCampaignDraft();
+    return {
+      ...draft,
+      budget: 1000,
+      maxPerWallet: 25,
+      minPerWallet: 0,
+      maxSharePercent: 0.5,
+      minScore: 60,
+      walletAgeDays: 30,
+      activeDaysLast14: 3,
+      proofUsageMinEvents: 5,
+      equalPercent: 20,
+      transform: 'sqrt',
+      termsAccepted: false
+    };
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -415,6 +471,45 @@ const DemoCampaignPage = () => {
     }));
   }, [data, source]);
 
+  const simulationResult = useMemo(() => {
+    if (!previewParticipants || previewParticipants.length === 0) {
+      return null;
+    }
+
+    const allocationPlan = computeAllocationPlan(simulationConfig, previewParticipants, {
+      supportsProofUsageFilter: true
+    });
+    const decisionSummary = computeDecisionSummary(simulationConfig, previewParticipants, {
+      supportsProofUsageFilter: true
+    });
+    const eligibleWallets = new Set(
+      allocationPlan.participants.map((participant) => participant.wallet)
+    );
+    const eligibleRiskCount =
+      source === 'commentary' || source === 'insights'
+        ? (data?.results as WalletRowWithInsights[] | undefined)?.filter((entry) => {
+            if (!eligibleWallets.has(entry.wallet)) {
+              return false;
+            }
+            return (
+              entry.insights.behavior_tag === 'suspected_farm' ||
+              entry.insights.farming_probability >= 0.5
+            );
+          }).length ?? 0
+        : 0;
+    const eligibleRiskPercent = allocationPlan.preview.eligibleCount
+      ? (eligibleRiskCount / allocationPlan.preview.eligibleCount) * 100
+      : decisionSummary.highRiskWallets.percent;
+
+    return {
+      allocationPlan,
+      decisionSummary,
+      eligibleRiskCount,
+      eligibleRiskPercent,
+      clusterRiskLevel: getClusterRiskLevel(eligibleRiskPercent)
+    };
+  }, [data, previewParticipants, simulationConfig, source]);
+
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-10">
       <PageHeader
@@ -455,6 +550,225 @@ const DemoCampaignPage = () => {
       {loading && <LoadingSkeleton lines={4} />}
 
       {data && !loading && <KpiCards summary={data.summary} showInsights={showInsights} />}
+
+      {previewParticipants && previewParticipants.length > 0 && simulationResult && (
+        <div className="rounded-3xl border border-sky-400/20 bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.16),_transparent_42%),linear-gradient(135deg,rgba(15,23,42,0.96),rgba(15,23,42,0.84))] p-6 shadow-[0_24px_80px_rgba(56,189,248,0.10)]">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-2xl">
+              <p className="text-xs uppercase tracking-[0.2em] text-sky-200/80">
+                Simulate Changes
+              </p>
+              <p className="mt-3 text-2xl font-semibold tracking-tight text-white">
+                Adjust decision rules without rerunning the campaign
+              </p>
+              <p className="mt-3 text-sm leading-6 text-slate-200">
+                This simulation uses the current wallet dataset already loaded on the page. It
+                updates eligibility, allocation output, and risk locally without another API run.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-200">
+              Current sample: {previewParticipants.length.toLocaleString()} wallets
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="flex flex-col gap-2 text-sm text-slate-300">
+                Min score
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={simulationConfig.minScore}
+                  onChange={(event) =>
+                    setSimulationConfig((prev) => ({
+                      ...prev,
+                      minScore: Number(event.target.value || 0)
+                    }))
+                  }
+                  className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2.5 text-white outline-none transition focus:border-sky-400/40"
+                />
+              </label>
+
+              <label className="flex flex-col gap-2 text-sm text-slate-300">
+                Wallet age threshold
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={simulationConfig.walletAgeDays}
+                  onChange={(event) =>
+                    setSimulationConfig((prev) => ({
+                      ...prev,
+                      walletAgeDays: Number(event.target.value || 0)
+                    }))
+                  }
+                  className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2.5 text-white outline-none transition focus:border-sky-400/40"
+                />
+              </label>
+
+              <label className="flex flex-col gap-2 text-sm text-slate-300">
+                Active days threshold
+                <input
+                  type="number"
+                  min="0"
+                  max="14"
+                  step="1"
+                  value={simulationConfig.activeDaysLast14}
+                  onChange={(event) =>
+                    setSimulationConfig((prev) => ({
+                      ...prev,
+                      activeDaysLast14: Number(event.target.value || 0)
+                    }))
+                  }
+                  className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2.5 text-white outline-none transition focus:border-sky-400/40"
+                />
+              </label>
+
+              <label className="flex flex-col gap-2 text-sm text-slate-300">
+                Proof usage threshold
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={simulationConfig.proofUsageMinEvents ?? 0}
+                  onChange={(event) =>
+                    setSimulationConfig((prev) => ({
+                      ...prev,
+                      proofUsageMinEvents: Number(event.target.value || 0)
+                    }))
+                  }
+                  className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2.5 text-white outline-none transition focus:border-sky-400/40"
+                />
+              </label>
+
+              <label className="flex flex-col gap-2 text-sm text-slate-300">
+                Allocation logic
+                <select
+                  value={simulationConfig.transform}
+                  onChange={(event) =>
+                    setSimulationConfig((prev) => ({
+                      ...prev,
+                      transform: event.target.value as AllocationTransform
+                    }))
+                  }
+                  className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2.5 text-white outline-none transition focus:border-sky-400/40"
+                >
+                  {simulationTransformOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="flex flex-col gap-2 text-sm text-slate-300">
+                Equal split %
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="5"
+                  value={simulationConfig.equalPercent}
+                  onChange={(event) =>
+                    setSimulationConfig((prev) => ({
+                      ...prev,
+                      equalPercent: Number(event.target.value || 0)
+                    }))
+                  }
+                  className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2.5 text-white outline-none transition focus:border-sky-400/40"
+                />
+              </label>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-slate-300">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                    Updated eligible count
+                  </p>
+                  <p className="mt-2 text-2xl font-semibold text-white">
+                    {simulationResult.allocationPlan.preview.eligibleCount.toLocaleString()}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-slate-300">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                    Updated avg allocation
+                  </p>
+                  <p className="mt-2 text-2xl font-semibold text-white">
+                    {formatAmount(simulationResult.allocationPlan.preview.estAvg)}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-slate-300">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                    Updated utilization
+                  </p>
+                  <p className="mt-2 text-2xl font-semibold text-white">
+                    {formatPercent(
+                      simulationResult.allocationPlan.preview.budgetUtilizationPercent
+                    )}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-slate-300">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                    Updated risk
+                  </p>
+                  <p className="mt-2 text-2xl font-semibold text-white">
+                    {formatPercent(simulationResult.eligibleRiskPercent)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-slate-200">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                    Simulated distribution
+                  </p>
+                  <span
+                    className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${riskLevelClassName[simulationResult.clusterRiskLevel]}`}
+                  >
+                    {simulationResult.clusterRiskLevel} risk
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Decision output
+                    </p>
+                    <p className="mt-1 text-sm text-white">
+                      Eligible {simulationResult.decisionSummary.eligibleWallets.count} | Rejected{' '}
+                      {simulationResult.decisionSummary.rejectedWallets.count}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Risk distribution
+                    </p>
+                    <p className="mt-1 text-sm text-white">
+                      {simulationResult.eligibleRiskCount.toLocaleString()} risky eligible wallets
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Top 3 simulated allocations
+                    </p>
+                    <div className="mt-1 space-y-1 text-sm text-white">
+                      {simulationResult.allocationPlan.allocations
+                        .slice(0, 3)
+                        .map((allocation) => (
+                          <div key={allocation.wallet} className="font-mono text-xs">
+                            {allocation.wallet.slice(0, 8)}... {formatAmount(allocation.amount)}
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {data && !loading && total === 0 && (
         <EmptyState

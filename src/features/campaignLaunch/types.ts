@@ -58,6 +58,21 @@ export type CampaignAllocation = {
   proofUsageEvents?: number;
 };
 
+export type CampaignDecisionMetric = {
+  count: number;
+  percent: number;
+};
+
+export type CampaignDecisionSummary = {
+  totalWallets: number;
+  eligibleWallets: CampaignDecisionMetric;
+  rejectedWallets: CampaignDecisionMetric;
+  highConfidenceWallets: CampaignDecisionMetric;
+  mediumConfidenceWallets: CampaignDecisionMetric;
+  highRiskWallets: CampaignDecisionMetric;
+  filteredOutPercent: number;
+};
+
 export type CampaignAllocationPreview = {
   eligibleCount: number;
   estAvg: number;
@@ -84,6 +99,7 @@ export type CampaignRecord = {
   createdAt: string;
   config: CampaignDraft;
   preview: CampaignAllocationPreview;
+  decisionSummary?: CampaignDecisionSummary;
 };
 
 export type LaunchYourCampaignCardProps = {

@@ -2,6 +2,7 @@ import type {
   AllocationTransform,
   CampaignAllocation,
   CampaignAllocationComputation,
+  CampaignDecisionSummary,
   CampaignAllocationPreview,
   CampaignDraft,
   CampaignPreviewParticipant,
@@ -13,6 +14,8 @@ type ComputePreviewOptions = {
 };
 
 const PARTICIPANT_PREVIEW_LABEL = 'Participant preview';
+const HIGH_CONFIDENCE_SCORE = 80;
+const HIGH_RISK_SCORE = 40;
 
 const clamp = (value: number, min: number, max: number): number => {
   return Math.min(Math.max(value, min), max);
@@ -28,6 +31,11 @@ const roundAllocation = (value: number, rule: RoundingRule): number => {
       return value;
   }
 };
+
+const toMetric = (count: number, total: number) => ({
+  count,
+  percent: total > 0 ? (count / total) * 100 : 0
+});
 
 const transformScore = (score: number, transform: AllocationTransform): number => {
   const safeScore = Math.max(score, 0);
@@ -99,6 +107,72 @@ const filterEligibleParticipants = (
 
     return true;
   });
+};
+
+const isHighRiskParticipant = (
+  participant: CampaignPreviewParticipant,
+  config: CampaignDraft,
+  supportsProofUsageFilter: boolean
+): boolean => {
+  if (participant.score < Math.min(config.minScore, HIGH_RISK_SCORE)) {
+    return true;
+  }
+
+  if (participant.walletAgeDays < Math.max(1, Math.ceil(config.walletAgeDays * 0.25))) {
+    return true;
+  }
+
+  if (participant.activeDaysLast14 <= Math.floor(config.activeDaysLast14 / 2)) {
+    return true;
+  }
+
+  if (
+    supportsProofUsageFilter &&
+    typeof config.proofUsageMinEvents === 'number' &&
+    (participant.proofUsageEvents ?? 0) < Math.max(1, Math.ceil(config.proofUsageMinEvents / 2))
+  ) {
+    return true;
+  }
+
+  return false;
+};
+
+export const computeDecisionSummary = (
+  config: CampaignDraft,
+  participants: CampaignPreviewParticipant[],
+  options?: ComputePreviewOptions
+): CampaignDecisionSummary => {
+  const supportsProofUsageFilter = options?.supportsProofUsageFilter ?? false;
+  const eligibleParticipants = filterEligibleParticipants(
+    config,
+    participants,
+    supportsProofUsageFilter
+  );
+  const eligibleWallets = new Set(eligibleParticipants.map((participant) => participant.wallet));
+  const rejectedParticipants = participants.filter(
+    (participant) => !eligibleWallets.has(participant.wallet)
+  );
+  const totalWallets = participants.length;
+  const highConfidenceCount = eligibleParticipants.filter(
+    (participant) => participant.score >= HIGH_CONFIDENCE_SCORE
+  ).length;
+  const mediumConfidenceCount = eligibleParticipants.filter(
+    (participant) =>
+      participant.score >= config.minScore && participant.score < HIGH_CONFIDENCE_SCORE
+  ).length;
+  const highRiskCount = rejectedParticipants.filter((participant) =>
+    isHighRiskParticipant(participant, config, supportsProofUsageFilter)
+  ).length;
+
+  return {
+    totalWallets,
+    eligibleWallets: toMetric(eligibleParticipants.length, totalWallets),
+    rejectedWallets: toMetric(rejectedParticipants.length, totalWallets),
+    highConfidenceWallets: toMetric(highConfidenceCount, totalWallets),
+    mediumConfidenceWallets: toMetric(mediumConfidenceCount, totalWallets),
+    highRiskWallets: toMetric(highRiskCount, totalWallets),
+    filteredOutPercent: totalWallets > 0 ? (rejectedParticipants.length / totalWallets) * 100 : 0
+  };
 };
 
 export const computeAllocationPreview = (

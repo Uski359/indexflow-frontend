@@ -172,6 +172,82 @@ const parseProofErrorHint = (value?: string | null) => {
   return null;
 };
 
+const stableStringify = (value: unknown): string => {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  }
+
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+      a.localeCompare(b)
+    );
+    return `{${entries
+      .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`)
+      .join(',')}}`;
+  }
+
+  return JSON.stringify(value);
+};
+
+const toHex = (buffer: ArrayBuffer): string =>
+  Array.from(new Uint8Array(buffer))
+    .map((value) => value.toString(16).padStart(2, '0'))
+    .join('');
+
+const hashText = async (value: string): Promise<string> => {
+  if (typeof window !== 'undefined' && window.crypto?.subtle) {
+    const encoded = new TextEncoder().encode(value);
+    const digest = await window.crypto.subtle.digest('SHA-256', encoded);
+    return toHex(digest);
+  }
+
+  let fallback = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    fallback = (fallback * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return fallback.toString(16).padStart(8, '0');
+};
+
+const shortenHash = (value: string) => {
+  if (value.length <= 18) {
+    return value;
+  }
+  return `${value.slice(0, 12)}...${value.slice(-8)}`;
+};
+
+type DecisionConfidence = {
+  score: number;
+  reliabilityLabel: 'High reliability decision' | 'Moderate reliability decision' | 'Low reliability decision';
+  dataCompleteness: number;
+  walletSampleSize: number;
+  modelCoverage: number;
+  riskDistribution: number;
+};
+
+const clampPercent = (value: number) => Math.max(0, Math.min(100, value));
+
+const getReliabilityLabel = (
+  score: number
+): DecisionConfidence['reliabilityLabel'] => {
+  if (score >= 80) {
+    return 'High reliability decision';
+  }
+  if (score >= 60) {
+    return 'Moderate reliability decision';
+  }
+  return 'Low reliability decision';
+};
+
+const getConfidenceBadgeClass = (score: number) => {
+  if (score >= 80) {
+    return 'border-emerald-400/30 bg-emerald-500/10 text-emerald-100';
+  }
+  if (score >= 60) {
+    return 'border-amber-400/30 bg-amber-500/10 text-amber-100';
+  }
+  return 'border-rose-400/30 bg-rose-500/10 text-rose-100';
+};
+
 const DemoProofPageInner = () => {
   const baseUrl = getDemoApiBaseUrl();
   const router = useRouter();
@@ -199,6 +275,17 @@ const DemoProofPageInner = () => {
   const [shareStatus, setShareStatus] = useState<string | null>(null);
   const [shareWarning, setShareWarning] = useState<string | null>(null);
   const [proofCopyStatus, setProofCopyStatus] = useState<string | null>(null);
+  const [manifestCopyStatus, setManifestCopyStatus] = useState<string | null>(null);
+  const [proofArtifactSeed, setProofArtifactSeed] = useState<{
+    walletSnapshot: string[];
+    criteriaSetId: CriteriaSetId;
+    windowType: ProofWindowType;
+  } | null>(null);
+  const [proofPackageHashes, setProofPackageHashes] = useState<{
+    inputHash: string;
+    policyHash: string;
+    outputHash: string;
+  } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const runIdRef = useRef(0);
   const initializedRef = useRef(false);
@@ -595,6 +682,172 @@ const DemoProofPageInner = () => {
     return best;
   }, [filteredResults]);
 
+  const proofPackageBase = useMemo(() => {
+    if (!proofArtifactSeed) {
+      return null;
+    }
+
+    const successfulRows = rows.filter(
+      (entry): entry is ProofWalletRow & { output: NonNullable<ProofWalletRow['output']> } =>
+        Boolean(entry.output) && !entry.error
+    );
+
+    if (!successfulRows.length) {
+      return null;
+    }
+
+    const firstOutput = successfulRows[0].output;
+    const engineVersions = Array.from(
+      new Set(
+        successfulRows
+          .map((entry) => entry.output.criteria?.engine_version)
+          .filter((value): value is string => Boolean(value))
+      )
+    );
+    const engineVersion =
+      engineVersions.length === 0
+        ? 'unknown'
+        : engineVersions.length === 1
+          ? engineVersions[0]
+          : engineVersions.join(', ');
+    const inputPayload = {
+      campaign_id: campaignId,
+      wallet_snapshot: proofArtifactSeed.walletSnapshot,
+      window_type: proofArtifactSeed.windowType
+    };
+    const policyPayload = {
+      campaign_id: campaignId,
+      criteria_set_id: firstOutput.criteria?.criteria_set_id ?? proofArtifactSeed.criteriaSetId,
+      criteria_params: firstOutput.criteria?.params ?? null,
+      window: firstOutput.window,
+      engine_version: engineVersion
+    };
+    const outputPayload = {
+      result_count: successfulRows.length,
+      verified_true: successfulRows.filter((entry) => entry.output.verified_usage).length,
+      verified_false: successfulRows.filter((entry) => !entry.output.verified_usage).length,
+      outputs: successfulRows
+        .map((entry) => ({
+          wallet: entry.wallet,
+          verified_usage: entry.output.verified_usage,
+          proof_hash: entry.output.proof.canonical_hash
+        }))
+        .sort((left, right) => left.wallet.localeCompare(right.wallet))
+    };
+
+    return {
+      engineVersion,
+      inputPayload,
+      policyPayload,
+      outputPayload
+    };
+  }, [proofArtifactSeed, rows]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!proofPackageBase) {
+      setProofPackageHashes(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void (async () => {
+      const [inputHash, policyHash, outputHash] = await Promise.all([
+        hashText(stableStringify(proofPackageBase.inputPayload)),
+        hashText(stableStringify(proofPackageBase.policyPayload)),
+        hashText(stableStringify(proofPackageBase.outputPayload))
+      ]);
+
+      if (cancelled) {
+        return;
+      }
+
+      setProofPackageHashes({ inputHash, policyHash, outputHash });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [proofPackageBase]);
+
+  const proofPackageManifest = useMemo(() => {
+    if (!proofPackageBase || !proofPackageHashes) {
+      return null;
+    }
+
+    return {
+      package_version: 'decision-proof-package/v1',
+      reproducible: true,
+      statement:
+        'This decision can be independently reproduced using the same inputs and policy.',
+      campaign_id: campaignId,
+      engine_version: proofPackageBase.engineVersion,
+      input: {
+        ...proofPackageBase.inputPayload,
+        hash: proofPackageHashes.inputHash
+      },
+      policy: {
+        ...proofPackageBase.policyPayload,
+        hash: proofPackageHashes.policyHash
+      },
+      output: {
+        ...proofPackageBase.outputPayload,
+        hash: proofPackageHashes.outputHash
+      }
+    };
+  }, [campaignId, proofPackageBase, proofPackageHashes]);
+
+  const proofManifestJson = useMemo(() => {
+    if (!proofPackageManifest) {
+      return null;
+    }
+    return JSON.stringify(proofPackageManifest, null, 2);
+  }, [proofPackageManifest]);
+
+  const decisionConfidence = useMemo<DecisionConfidence | null>(() => {
+    if (!proofPackageManifest) {
+      return null;
+    }
+
+    const successfulRows = rows.filter((entry) => entry.output && !entry.error);
+    const validRowCount = successfulRows.length;
+    if (!validRowCount) {
+      return null;
+    }
+
+    const dataCompleteness = clampPercent(
+      ((validEntries - invalidList.length) / Math.max(validEntries, 1)) * 100
+    );
+    const walletSampleSize = clampPercent((Math.min(validRowCount, 50) / 50) * 100);
+    const modelCoverage = clampPercent(
+      (successfulRows.filter((entry) => entry.insights || entry.commentary).length / validRowCount) *
+        100
+    );
+    const riskyRows = successfulRows.filter((entry) => {
+      const farmProbability = entry.insights?.farming_probability ?? 0;
+      const behaviorTag = entry.insights?.behavior_tag;
+      return farmProbability >= 0.5 || behaviorTag === 'suspected_farm';
+    }).length;
+    const riskDistribution = clampPercent(100 - (riskyRows / validRowCount) * 100);
+    const score = Math.round(
+      dataCompleteness * 0.3 +
+        walletSampleSize * 0.2 +
+        modelCoverage * 0.25 +
+        riskDistribution * 0.25
+    );
+
+    return {
+      score,
+      reliabilityLabel: getReliabilityLabel(score),
+      dataCompleteness,
+      walletSampleSize,
+      modelCoverage,
+      riskDistribution
+    };
+  }, [invalidList.length, proofPackageManifest, rows, validEntries]);
+
   const syncUrlWith = (walletsRaw: string, normalizedWallets: string[]) => {
     if (!isHydrated) {
       return;
@@ -668,6 +921,9 @@ const DemoProofPageInner = () => {
     setEnsResolution(null);
     setGateInvalids([]);
     setDeterminismCheck(null);
+    setProofArtifactSeed(null);
+    setProofPackageHashes(null);
+    setManifestCopyStatus(null);
   };
 
   const handleCancel = () => {
@@ -865,6 +1121,11 @@ const DemoProofPageInner = () => {
       if (!controller.signal.aborted) {
         const merged = result.rows.map(applyMeta);
         setRows(merged);
+        setProofArtifactSeed({
+          walletSnapshot: [...orderedAddresses],
+          criteriaSetId: safeCriteriaSetId,
+          windowType
+        });
         if (isDev) {
           console.info('[proof] run summary', {
             evaluated: merged.length,
@@ -967,6 +1228,20 @@ const DemoProofPageInner = () => {
     }
 
     setTimeout(() => setProofCopyStatus(null), 1500);
+  };
+  const handleCopyManifest = async () => {
+    if (!navigator?.clipboard?.writeText || !proofManifestJson) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(proofManifestJson);
+      setManifestCopyStatus('Copied manifest JSON.');
+    } catch {
+      setManifestCopyStatus('Failed to copy manifest.');
+    }
+
+    setTimeout(() => setManifestCopyStatus(null), 1500);
   };
 
   return (
@@ -1160,6 +1435,122 @@ const DemoProofPageInner = () => {
       </div>
 
       {hasResults && !loading && <ProofKpis summary={summary} insightsEnabled={insightsEnabled} />}
+
+      {hasResults && !loading && proofPackageManifest && proofManifestJson && (
+        <div className="overflow-hidden rounded-3xl border border-sky-400/20 bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.18),_transparent_42%),linear-gradient(135deg,rgba(15,23,42,0.96),rgba(15,23,42,0.84))] p-6 shadow-[0_24px_80px_rgba(56,189,248,0.12)]">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+            <div className="max-w-3xl">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-xs uppercase tracking-[0.2em] text-sky-200/80">
+                  Decision Proof Package
+                </span>
+                <span className="inline-flex items-center rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-100">
+                  Reproducible
+                </span>
+              </div>
+              <p className="mt-3 text-3xl font-semibold tracking-tight text-white">
+                Verifiable decision artifact
+              </p>
+              <p className="mt-3 text-sm leading-6 text-slate-200">
+                This decision can be independently reproduced using the same inputs and policy.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              {decisionConfidence && (
+                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-right">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                    Decision Confidence
+                  </p>
+                  <div className="mt-2 flex items-center justify-end gap-2">
+                    <span
+                      title={`Confidence is affected by data completeness (${Math.round(
+                        decisionConfidence.dataCompleteness
+                      )}%), wallet sample size (${Math.round(
+                        decisionConfidence.walletSampleSize
+                      )}%), model coverage (${Math.round(
+                        decisionConfidence.modelCoverage
+                      )}%), and risk distribution (${Math.round(
+                        decisionConfidence.riskDistribution
+                      )}%).`}
+                      className={`inline-flex cursor-help items-center rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${getConfidenceBadgeClass(
+                        decisionConfidence.score
+                      )}`}
+                    >
+                      Confidence: {decisionConfidence.score}% -{' '}
+                      {decisionConfidence.reliabilityLabel}
+                    </span>
+                  </div>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={handleCopyManifest}
+                className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-200 hover:text-white"
+              >
+                Copy manifest JSON
+              </button>
+              {manifestCopyStatus && (
+                <span className="text-xs text-slate-300">{manifestCopyStatus}</span>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Input hash</p>
+              <p className="mt-2 font-mono text-sm text-slate-100" title={proofPackageManifest.input.hash}>
+                {shortenHash(proofPackageManifest.input.hash)}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                Wallet snapshot ({proofPackageManifest.input.wallet_snapshot.length} wallets)
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Policy hash</p>
+              <p className="mt-2 font-mono text-sm text-slate-100" title={proofPackageManifest.policy.hash}>
+                {shortenHash(proofPackageManifest.policy.hash)}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                Criteria set {proofPackageManifest.policy.criteria_set_id}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Engine version</p>
+              <p className="mt-2 text-sm font-semibold text-white">
+                {proofPackageManifest.engine_version}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                Execution policy used for this run
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Output hash</p>
+              <p className="mt-2 font-mono text-sm text-slate-100" title={proofPackageManifest.output.hash}>
+                {shortenHash(proofPackageManifest.output.hash)}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                {proofPackageManifest.output.result_count} verified outputs bundled
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                  JSON manifest
+                </p>
+                <p className="mt-1 text-sm text-slate-300">
+                  Canonical package describing the input snapshot, policy, engine, and outputs.
+                </p>
+              </div>
+            </div>
+            <pre className="mt-4 max-h-80 overflow-auto rounded-2xl border border-white/10 bg-slate-950/80 p-4 text-xs leading-6 text-sky-100">
+              <code>{proofManifestJson}</code>
+            </pre>
+          </div>
+        </div>
+      )}
 
       {hasResults && !loading && (
         <>
