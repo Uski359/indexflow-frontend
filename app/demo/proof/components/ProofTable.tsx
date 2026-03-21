@@ -3,7 +3,6 @@
 import { useState } from 'react';
 
 import type { ProofWalletRow } from '@/lib/proofTypes';
-import { farmRiskClass, scoreClass } from '@/lib/uiFormat';
 
 type ProofTableProps = {
   results: ProofWalletRow[];
@@ -21,23 +20,9 @@ const shortenWallet = (wallet: string) => {
   return `${wallet.slice(0, 6)}...${wallet.slice(-4)}`;
 };
 
-const tagStyles: Record<'organic' | 'suspected_farm' | 'inactive' | 'mixed', string> = {
-  organic: 'bg-emerald-500/20 text-emerald-200',
-  suspected_farm: 'bg-rose-500/20 text-rose-200',
-  inactive: 'bg-slate-500/30 text-slate-200',
-  mixed: 'bg-amber-500/20 text-amber-200'
-};
-
-const tagLabels: Record<'organic' | 'suspected_farm' | 'inactive' | 'mixed', string> = {
-  organic: 'Organic',
-  suspected_farm: 'Suspected farm',
-  inactive: 'Inactive',
-  mixed: 'Mixed'
-};
-
 const sourceStyles: Record<ProofWalletRow['source'], string> = {
-  commentary: 'bg-emerald-500/20 text-emerald-200',
-  insights: 'bg-sky-500/20 text-sky-200',
+  commentary: 'bg-emerald-500/15 text-emerald-100',
+  insights: 'bg-sky-500/15 text-sky-100',
   core: 'bg-white/10 text-slate-200'
 };
 
@@ -45,6 +30,44 @@ const sourceLabels: Record<ProofWalletRow['source'], string> = {
   commentary: 'Commentary',
   insights: 'Insights',
   core: 'Core'
+};
+
+const getScoreBand = (score: number) => {
+  if (score >= 70) {
+    return {
+      label: 'High',
+      className: 'border-emerald-400/30 bg-emerald-500/15 text-emerald-100'
+    };
+  }
+  if (score >= 40) {
+    return {
+      label: 'Medium',
+      className: 'border-amber-400/30 bg-amber-500/15 text-amber-100'
+    };
+  }
+  return {
+    label: 'Low',
+    className: 'border-rose-400/30 bg-rose-500/15 text-rose-100'
+  };
+};
+
+const getRiskBand = (farmPercent: number) => {
+  if (farmPercent >= 70) {
+    return {
+      label: 'High',
+      className: 'border-rose-400/30 bg-rose-500/15 text-rose-100'
+    };
+  }
+  if (farmPercent >= 40) {
+    return {
+      label: 'Medium',
+      className: 'border-amber-400/30 bg-amber-500/15 text-amber-100'
+    };
+  }
+  return {
+    label: 'Low',
+    className: 'border-emerald-400/30 bg-emerald-500/15 text-emerald-100'
+  };
 };
 
 const ProofTable = ({ results, insightsEnabled, onSelect }: ProofTableProps) => {
@@ -64,225 +87,158 @@ const ProofTable = ({ results, insightsEnabled, onSelect }: ProofTableProps) => 
   };
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-white/10 bg-black/20">
-      <table className="min-w-full text-sm">
-        <thead className="bg-white/5 text-left text-xs uppercase tracking-[0.2em] text-slate-400">
-          <tr>
-            <th className="px-4 py-3">Wallet</th>
-            <th className="px-4 py-3">Verified usage</th>
-            <th className="px-4 py-3">Tx count</th>
-            <th className="px-4 py-3">Days active</th>
-            <th className="px-4 py-3">Unique contracts</th>
-            <th className="px-4 py-3">Score</th>
-            <th className="px-4 py-3">Farm%</th>
-            <th className="px-4 py-3">Tag</th>
-            <th className="px-4 py-3">Cached</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-white/5">
-          {results.map((entry) => {
-            const summary = entry.output?.usage_summary;
-            const verified = entry.output?.verified_usage;
-            const hasCommentary =
-              Boolean(entry.commentary) || entry.cached_commentary !== undefined;
-            const farmPercent = Math.round((entry.insights?.farming_probability ?? 0) * 100);
-            const hasError = Boolean(entry.error) || !entry.output;
-            const displayName = entry.display_name?.trim();
+    <div className="overflow-hidden rounded-3xl border border-white/10 bg-black/20">
+      <div className="max-h-[720px] overflow-auto">
+        <table className="min-w-full text-sm">
+          <thead className="sticky top-0 z-10 bg-slate-950/95 text-left text-[11px] uppercase tracking-[0.18em] text-slate-400 backdrop-blur">
+            <tr className="border-b border-white/10">
+              <th className="px-5 py-4">Wallet</th>
+              <th className="px-5 py-4">Decision</th>
+              <th className="px-5 py-4">Score band</th>
+              <th className="px-5 py-4">Risk</th>
+              <th className="px-5 py-4">Activity</th>
+              <th className="px-5 py-4">Source</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/5">
+            {results.map((entry, index) => {
+              const summary = entry.output?.usage_summary;
+              const hasError = Boolean(entry.error) || !entry.output;
+              const verified = entry.output?.verified_usage ?? false;
+              const score = entry.insights?.overall_score ?? 0;
+              const farmPercent = Math.round((entry.insights?.farming_probability ?? 0) * 100);
+              const scoreBand = getScoreBand(score);
+              const riskBand = getRiskBand(farmPercent);
+              const isTopWallet = !hasError && index < 5;
+              const displayName = entry.display_name?.trim();
 
-            return (
-              <tr
-                key={entry.wallet}
-                onClick={() => {
-                  if (!hasError) {
-                    onSelect(entry);
+              return (
+                <tr
+                  key={entry.wallet}
+                  onClick={() => {
+                    if (!hasError) {
+                      onSelect(entry);
+                    }
+                  }}
+                  className={
+                    hasError
+                      ? 'cursor-default bg-rose-500/5'
+                      : `cursor-pointer transition hover:bg-white/5 ${
+                          isTopWallet ? 'bg-emerald-500/[0.04]' : ''
+                        }`
                   }
-                }}
-                className={hasError ? 'cursor-default bg-rose-500/5' : 'cursor-pointer hover:bg-white/5'}
-              >
-                <td className="px-4 py-3 text-slate-100" title={entry.wallet}>
-                  <div className="flex flex-col gap-2">
-                    {displayName ? (
-                      <div className="flex flex-col gap-2">
+                >
+                  <td className="px-5 py-5 text-slate-100">
+                    <div className="flex flex-col gap-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span>{displayName}</span>
-                        <span className="rounded-full border border-emerald-400/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-200">
-                          ENS
+                        <span className="font-medium text-white" title={entry.wallet}>
+                          {displayName || shortenWallet(entry.wallet)}
                         </span>
-                        {entry.ens_cached && (
-                          <span className="rounded-full border border-sky-400/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-200">
-                            Cached
+                        {displayName && (
+                          <span className="rounded-full border border-emerald-400/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200">
+                            ENS
                           </span>
                         )}
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void handleCopy(displayName);
-                            }}
-                            className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-300 hover:text-white"
-                          >
-                            {copiedValue === displayName ? 'Copied' : 'Copy name'}
-                          </button>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                          <span>{shortenWallet(entry.wallet)}</span>
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void handleCopy(entry.wallet);
-                            }}
-                            className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-300 hover:text-white"
-                          >
-                            {copiedValue === entry.wallet ? 'Copied' : 'Copy address'}
-                          </button>
-                        </div>
+                        {isTopWallet && (
+                          <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-100">
+                            Top wallet
+                          </span>
+                        )}
                       </div>
-                    ) : (
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
                         <span>{shortenWallet(entry.wallet)}</span>
                         <button
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
-                            void handleCopy(entry.wallet);
+                            void handleCopy(displayName || entry.wallet);
                           }}
-                          className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-300 hover:text-white"
+                          className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-300 hover:text-white"
                         >
-                          {copiedValue === entry.wallet ? 'Copied' : 'Copy'}
+                          {copiedValue === (displayName || entry.wallet) ? 'Copied' : 'Copy'}
                         </button>
                       </div>
+                    </div>
+                  </td>
+                  <td className="px-5 py-5">
+                    {hasError ? (
+                      <span
+                        title={entry.error ?? 'Error'}
+                        className="inline-flex items-center rounded-full border border-rose-400/30 bg-rose-500/15 px-3 py-1 text-xs font-semibold text-rose-100"
+                      >
+                        Error
+                      </span>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        <span
+                          className={`inline-flex w-fit items-center rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${
+                            verified
+                              ? 'border-emerald-400/30 bg-emerald-500/15 text-emerald-100'
+                              : 'border-rose-400/30 bg-rose-500/15 text-rose-100'
+                          }`}
+                        >
+                          {verified ? 'Eligible' : 'Rejected'}
+                        </span>
+                        <span className="text-xs text-slate-400">
+                          {verified ? 'Included in allocation' : 'Excluded from allocation'}
+                        </span>
+                      </div>
                     )}
+                  </td>
+                  <td className="px-5 py-5">
+                    {hasError ? (
+                      <span className="text-slate-500">--</span>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        <span
+                          className={`inline-flex w-fit items-center rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${scoreBand.className}`}
+                        >
+                          {scoreBand.label}
+                        </span>
+                        <span className="text-sm font-medium text-white">
+                          {insightsEnabled ? formatNumber(score) : '--'}
+                        </span>
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-5 py-5">
+                    {hasError ? (
+                      <span className="text-slate-500">--</span>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        <span
+                          className={`inline-flex w-fit items-center rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${riskBand.className}`}
+                        >
+                          {riskBand.label}
+                        </span>
+                        <span className="text-sm text-slate-300">{formatPercent((entry.insights?.farming_probability ?? 0))}</span>
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-5 py-5 text-slate-300">
+                    {summary ? (
+                      <div className="space-y-1.5">
+                        <div>{formatNumber(summary.tx_count)} tx</div>
+                        <div>{formatNumber(summary.days_active)} active days</div>
+                        <div>{formatNumber(summary.unique_contracts)} contracts</div>
+                      </div>
+                    ) : (
+                      <span className="text-slate-500">Unavailable</span>
+                    )}
+                  </td>
+                  <td className="px-5 py-5">
                     <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${sourceStyles[entry.source]}`}
+                      className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${sourceStyles[entry.source]}`}
                     >
                       {sourceLabels[entry.source]}
                     </span>
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  {hasError ? (
-                    <span
-                      title={entry.error ?? 'Error'}
-                      className="inline-flex items-center rounded-full bg-rose-500/20 px-2.5 py-1 text-xs font-semibold text-rose-200"
-                    >
-                      Error
-                    </span>
-                  ) : (
-                    <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
-                        verified
-                          ? 'bg-emerald-500/20 text-emerald-200'
-                          : 'bg-rose-500/20 text-rose-200'
-                      }`}
-                    >
-                      {verified ? 'Verified' : 'Not verified'}
-                    </span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-slate-200">
-                  {summary ? formatNumber(summary.tx_count) : '--'}
-                </td>
-                <td className="px-4 py-3 text-slate-200">
-                  {summary ? formatNumber(summary.days_active) : '--'}
-                </td>
-                <td className="px-4 py-3 text-slate-200">
-                  {summary ? formatNumber(summary.unique_contracts) : '--'}
-                </td>
-                <td className="px-4 py-3 text-slate-200">
-                  {summary ? (
-                    insightsEnabled ? (
-                      <span
-                        className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${scoreClass(
-                          entry.insights?.overall_score ?? 0
-                        )}`}
-                      >
-                        {formatNumber(entry.insights?.overall_score ?? 0)}
-                      </span>
-                    ) : (
-                      formatNumber(entry.insights?.overall_score ?? 0)
-                    )
-                  ) : (
-                    '--'
-                  )}
-                </td>
-                <td className="px-4 py-3 text-slate-200">
-                  {summary ? (
-                    insightsEnabled ? (
-                      <span
-                        className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${farmRiskClass(
-                          farmPercent
-                        )}`}
-                      >
-                        {formatPercent(entry.insights?.farming_probability ?? 0)}
-                      </span>
-                    ) : (
-                      formatPercent(entry.insights?.farming_probability ?? 0)
-                    )
-                  ) : (
-                    '--'
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  {summary ? (
-                    <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
-                        tagStyles[entry.insights?.behavior_tag ?? 'mixed']
-                      }`}
-                    >
-                      {tagLabels[entry.insights?.behavior_tag ?? 'mixed']}
-                    </span>
-                  ) : (
-                    '--'
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  {summary ? (
-                    <div className="flex flex-wrap gap-2">
-                      <span
-                        title={entry.cached_core ? 'Core cached' : 'Core live'}
-                        className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
-                          entry.cached_core
-                            ? 'bg-sky-500/20 text-sky-200'
-                            : 'bg-white/10 text-slate-200'
-                        }`}
-                      >
-                        Core
-                      </span>
-                      <span
-                        title={entry.cached_insights ? 'Insights cached' : 'Insights live'}
-                        className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
-                          entry.cached_insights
-                            ? 'bg-sky-500/20 text-sky-200'
-                            : 'bg-white/10 text-slate-200'
-                        }`}
-                      >
-                        Insights
-                      </span>
-                      {hasCommentary && (
-                        <span
-                          title={
-                            entry.cached_commentary ? 'Commentary cached' : 'Commentary live'
-                          }
-                          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
-                            entry.cached_commentary
-                              ? 'bg-sky-500/20 text-sky-200'
-                              : 'bg-white/10 text-slate-200'
-                          }`}
-                        >
-                          Commentary
-                        </span>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="text-xs text-slate-500">Unavailable</span>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 };
