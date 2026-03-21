@@ -28,7 +28,7 @@ const escapeCsvCell = (value: string | number | boolean | null | undefined) => {
   return `"${normalized.replace(/"/g, '""')}"`;
 };
 
-const buildCsvContent = (rows: ProofWalletRow[]) => {
+export const buildProofCsvContent = (rows: ProofWalletRow[]) => {
   const includeCommentary = rows.some((row) => Boolean(row.commentary?.text));
   const headers = [
     'wallet',
@@ -98,7 +98,7 @@ export const exportProofCsv = ({
     return;
   }
 
-  const csv = buildCsvContent(rows);
+  const csv = buildProofCsvContent(rows);
   const date = formatDateYYYYMMDD(new Date());
   const safeCriteria = criteriaSetId.replace(/[^a-z0-9-_]+/gi, '_');
   const filename = `indexflow_proof_${campaignId}_${windowType}_${safeCriteria}_${date}.csv`;

@@ -62,6 +62,13 @@ type CampaignInsight = {
   toneClassName: string;
 };
 
+type AllocationOptimalityExplanation = {
+  fairnessExplanation: string;
+  scoreBandExplanation: string;
+  similarityExplanation: string;
+  summary: string;
+};
+
 type CampaignProofPackage = {
   manifest: string;
   inputHash: string;
@@ -355,6 +362,53 @@ const buildAllocationReason = (
   return `Low band wallet with score ${allocation.score.toFixed(2)}. It received the equal base allocation, but a smaller weighted uplift because its score is lower under the same hybrid formula.`;
 };
 
+const getAllocationOptimalityExplanation = (
+  allocations: CampaignAllocation[],
+  logic: DistributionLogic | null,
+  bandSummary: Record<ScoreBand, number>
+): AllocationOptimalityExplanation | null => {
+  if (!logic || allocations.length === 0) {
+    return null;
+  }
+
+  const sortedByAmount = [...allocations].sort((left, right) => right.amount - left.amount);
+  const medianAllocation = sortedByAmount[Math.floor(sortedByAmount.length / 2)] ?? sortedByAmount[0];
+  const topAllocation = sortedByAmount[0];
+  const lowBandCount = bandSummary.Low;
+  const highBandCount = bandSummary.High;
+  const mediumBandCount = bandSummary.Medium;
+  const spreadRatio =
+    medianAllocation && medianAllocation.amount > 0
+      ? topAllocation.amount / medianAllocation.amount
+      : 1;
+
+  const fairnessExplanation =
+    logic.label === 'Equal'
+      ? 'This distribution maximizes fairness by giving every eligible wallet the same baseline reward, so wallets are treated uniformly once they satisfy the campaign filters.'
+      : logic.label === 'Score-weighted'
+        ? 'This distribution maximizes fairness by applying one transparent score formula to every eligible wallet, which lets stronger organic behavior earn more without introducing manual exceptions.'
+        : 'This distribution maximizes fairness by combining an equal base allocation with a score-weighted uplift, so every eligible wallet participates while higher-confidence behavior still earns a measured premium.';
+
+  const scoreBandExplanation =
+    logic.label === 'Equal'
+      ? `Score bands still organize the cohort into High (${highBandCount}), Medium (${mediumBandCount}), and Low (${lowBandCount}) quality tiers, but the payout stays aligned unless caps or rounding create minor variation.`
+      : `Score bands shape the reward curve directly: High-band wallets capture the strongest uplift, Medium-band wallets receive a moderated share, and Low-band wallets stay eligible with less budget concentration. The current cohort splits into High (${highBandCount}), Medium (${mediumBandCount}), and Low (${lowBandCount}) wallets.`;
+
+  const similarityExplanation =
+    logic.label === 'Equal'
+      ? 'Wallets with similar rewards are being treated similarly because the policy prioritizes equal treatment across all eligible users. Any small differences come from deterministic caps or rounding, not discretionary judgment.'
+      : spreadRatio >= 1.75
+        ? `Wallets receive noticeably different rewards when their scores place them in different confidence bands or near the top of the weighted curve. Similar rewards usually indicate similar scores and the same policy treatment, while larger differences reflect a deliberate premium for stronger signals.`
+        : 'Wallets with similar rewards generally sit close together on score and eligibility quality, while different rewards appear when one wallet lands in a stronger band or benefits more from the weighted component of the formula.';
+
+  return {
+    fairnessExplanation,
+    scoreBandExplanation,
+    similarityExplanation,
+    summary: 'This allocation prioritizes organic users while minimizing sybil exposure.'
+  };
+};
+
 const CampaignDetailPage = () => {
   const params = useParams();
   const campaignId = Array.isArray(params.id) ? params.id[0] : params.id;
@@ -406,6 +460,10 @@ const CampaignDetailPage = () => {
       { High: 0, Medium: 0, Low: 0 }
     );
   }, [allocations]);
+  const allocationOptimality = useMemo(
+    () => getAllocationOptimalityExplanation(allocations, distributionLogic, bandSummary),
+    [allocations, bandSummary, distributionLogic]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -990,6 +1048,60 @@ const CampaignDetailPage = () => {
                 </div>
               </div>
             </div>
+
+            {allocationOptimality && (
+              <div className="rounded-3xl border border-emerald-400/20 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_40%),linear-gradient(135deg,rgba(15,23,42,0.94),rgba(15,23,42,0.84))] p-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="max-w-3xl">
+                    <p className="text-xs uppercase tracking-[0.18em] text-emerald-200/80">
+                      Optimality Explanation
+                    </p>
+                    <p className="mt-2 text-2xl font-semibold tracking-tight text-white">
+                      This allocation prioritizes organic users while minimizing sybil exposure.
+                    </p>
+                    <p className="mt-3 text-sm leading-6 text-slate-200">
+                      {allocationOptimality.fairnessExplanation}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-200">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                      Allocation posture
+                    </p>
+                    <p className="mt-2 font-semibold text-white">
+                      {distributionLogic?.label ?? 'Unavailable'}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {distributionLogic?.formulaReference}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-5 grid gap-4 lg:grid-cols-3">
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-slate-200">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                      Why this maximizes fairness
+                    </p>
+                    <p className="mt-3 leading-6">{allocationOptimality.fairnessExplanation}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-slate-200">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                      How score bands influence allocation
+                    </p>
+                    <p className="mt-3 leading-6">{allocationOptimality.scoreBandExplanation}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-slate-200">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                      Why rewards converge or diverge
+                    </p>
+                    <p className="mt-3 leading-6">{allocationOptimality.similarityExplanation}</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/5 p-4 text-sm text-emerald-100">
+                  {allocationOptimality.summary}
+                </div>
+              </div>
+            )}
 
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">

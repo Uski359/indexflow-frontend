@@ -13,7 +13,7 @@ import {
   type EnsBatchResult,
   type EvaluationWalletGateResult
 } from '@/lib/ens';
-import { exportProofCsv } from '@/lib/proofCsv';
+import { buildProofCsvContent, exportProofCsv } from '@/lib/proofCsv';
 import {
   buildUsageWindow,
   fetchMockWallets,
@@ -215,14 +215,74 @@ const shortenHash = (value: string) => {
   return `${value.slice(0, 12)}...${value.slice(-8)}`;
 };
 
+const downloadTextFile = (filename: string, content: string, contentType: string) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const blob = new Blob([content], { type: contentType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+};
+
 type DecisionConfidence = {
   score: number;
   reliabilityLabel: 'High reliability decision' | 'Moderate reliability decision' | 'Low reliability decision';
-  dataCompleteness: number;
-  walletSampleSize: number;
-  modelCoverage: number;
-  riskDistribution: number;
+  dataCoverageScore: number;
+  sampleSizeReliability: number;
+  riskAdjustedConfidence: number;
+  featureCompleteness: number;
 };
+
+type OptimizationInsight = {
+  currentMinScore: number;
+  suggestedMinScore: number;
+  eligibleBefore: number;
+  eligibleAfter: number;
+  eligibleCountChange: number;
+  riskReductionPct: number;
+  budgetUtilizationChangePct: number;
+  retainedEligiblePct: number;
+  baselineRiskRate: number;
+  suggestedRiskRate: number;
+  assistantSummary: string;
+};
+
+type RiskAnalysisItem = {
+  id: string;
+  title: string;
+  detail: string;
+  severity: 'high' | 'medium';
+  affectedWallets: number;
+  suggestions: string[];
+};
+
+type ProofRunSnapshot = {
+  id: number;
+  label: string;
+  createdAt: number;
+  criteriaSetId: CriteriaSetId;
+  windowType: ProofWindowType;
+  filters: ProofFilterState;
+  eligibleCount: number;
+  riskRate: number;
+  estimatedAvgAllocation: number;
+  rowsEvaluated: number;
+};
+
+type BenchmarkInsight = {
+  id: string;
+  label: string;
+  headline: string;
+  detail: string;
+  tone: 'higher_risk' | 'below_typical' | 'stronger' | 'typical';
+};
+
+type FinalDecisionStatus = 'draft' | 'reviewed' | 'finalized';
 
 const clampPercent = (value: number) => Math.max(0, Math.min(100, value));
 
@@ -246,6 +306,187 @@ const getConfidenceBadgeClass = (score: number) => {
     return 'border-amber-400/30 bg-amber-500/10 text-amber-100';
   }
   return 'border-rose-400/30 bg-rose-500/10 text-rose-100';
+};
+
+const matchesResultFilters = (
+  entry: ProofWalletRow,
+  filters: ProofFilterState,
+  insightsEnabled: boolean
+) => {
+  if (entry.error || !entry.output) {
+    return true;
+  }
+
+  if (filters.verified !== 'all') {
+    const shouldBeVerified = filters.verified === 'true';
+    if (entry.output.verified_usage !== shouldBeVerified) {
+      return false;
+    }
+  }
+
+  const summary = entry.output.usage_summary;
+  if (summary.tx_count < filters.minTxCount) {
+    return false;
+  }
+  if (summary.days_active < filters.minDaysActive) {
+    return false;
+  }
+  if (summary.unique_contracts < filters.minUniqueContracts) {
+    return false;
+  }
+
+  if (insightsEnabled && entry.insights) {
+    const farmPercent = entry.insights.farming_probability * 100;
+    if (entry.insights.overall_score < filters.minScore) {
+      return false;
+    }
+    if (entry.insights.overall_score > filters.maxScore) {
+      return false;
+    }
+    if (farmPercent < filters.minFarmPercent) {
+      return false;
+    }
+    if (farmPercent > filters.maxFarmPercent) {
+      return false;
+    }
+    if (filters.tag !== 'all' && entry.insights.behavior_tag !== filters.tag) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+const isRiskyWallet = (entry: ProofWalletRow) => {
+  const farmProbability = entry.insights?.farming_probability ?? 0;
+  const behaviorTag = entry.insights?.behavior_tag;
+  return farmProbability >= 0.5 || behaviorTag === 'suspected_farm';
+};
+
+const matchesOptimizationBaseFilters = (
+  entry: ProofWalletRow,
+  filters: ProofFilterState
+) => {
+  if (entry.error || !entry.output || !entry.insights) {
+    return false;
+  }
+
+  if (filters.verified !== 'all') {
+    const shouldBeVerified = filters.verified === 'true';
+    if (entry.output.verified_usage !== shouldBeVerified) {
+      return false;
+    }
+  }
+
+  const usageSummary = entry.output.usage_summary;
+  if (usageSummary.tx_count < filters.minTxCount) {
+    return false;
+  }
+  if (usageSummary.days_active < filters.minDaysActive) {
+    return false;
+  }
+  if (usageSummary.unique_contracts < filters.minUniqueContracts) {
+    return false;
+  }
+
+  const farmPercent = entry.insights.farming_probability * 100;
+  if (entry.insights.overall_score > filters.maxScore) {
+    return false;
+  }
+  if (farmPercent < filters.minFarmPercent) {
+    return false;
+  }
+  if (farmPercent > filters.maxFarmPercent) {
+    return false;
+  }
+  if (filters.tag !== 'all' && entry.insights.behavior_tag !== filters.tag) {
+    return false;
+  }
+
+  return true;
+};
+
+const formatSignedPercent = (value: number) =>
+  `${value > 0 ? '+' : ''}${Math.round(value)}%`;
+
+const formatSignedCount = (value: number) => `${value > 0 ? '+' : ''}${value}`;
+
+const formatSignedDecimal = (value: number) =>
+  `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
+
+const proofBenchmarks = {
+  typicalSybilRatioPct: 12,
+  typicalEligibleRatePct: 58,
+  typicalAverageScore: 68
+} as const;
+
+const riskSeverityClass = (severity: RiskAnalysisItem['severity']) =>
+  severity === 'high'
+    ? 'border-rose-400/30 bg-rose-500/10 text-rose-100'
+    : 'border-amber-400/30 bg-amber-500/10 text-amber-100';
+
+const benchmarkToneClass = (tone: BenchmarkInsight['tone']) => {
+  switch (tone) {
+    case 'higher_risk':
+      return 'border-rose-400/30 bg-rose-500/10 text-rose-100';
+    case 'below_typical':
+      return 'border-amber-400/30 bg-amber-500/10 text-amber-100';
+    case 'stronger':
+      return 'border-emerald-400/30 bg-emerald-500/10 text-emerald-100';
+    default:
+      return 'border-sky-400/30 bg-sky-500/10 text-sky-100';
+  }
+};
+
+const decisionStatusClass = (status: FinalDecisionStatus) => {
+  switch (status) {
+    case 'finalized':
+      return 'border-emerald-400/30 bg-emerald-500/10 text-emerald-100';
+    case 'reviewed':
+      return 'border-sky-400/30 bg-sky-500/10 text-sky-100';
+    default:
+      return 'border-amber-400/30 bg-amber-500/10 text-amber-100';
+  }
+};
+
+const buildRunSnapshot = ({
+  id,
+  rows,
+  filters,
+  criteriaSetId,
+  windowType
+}: {
+  id: number;
+  rows: ProofWalletRow[];
+  filters: ProofFilterState;
+  criteriaSetId: CriteriaSetId;
+  windowType: ProofWindowType;
+}): ProofRunSnapshot => {
+  const insightsActive = rows.some(
+    (row) => row.source === 'commentary' || row.source === 'insights'
+  );
+  const filteredRows = rows.filter((entry) =>
+    matchesResultFilters(entry, filters, insightsActive)
+  );
+  const eligibleRows = filteredRows.filter((entry) => entry.output && !entry.error);
+  const riskyRows = eligibleRows.filter(isRiskyWallet).length;
+  const eligibleCount = eligibleRows.length;
+  const riskRate = eligibleCount ? (riskyRows / eligibleCount) * 100 : 0;
+  const normalizedBudget = 1000;
+  const estimatedAvgAllocation = eligibleCount ? normalizedBudget / eligibleCount : 0;
+
+  return {
+    id,
+    label: `Run v${id}`,
+    createdAt: Date.now(),
+    criteriaSetId,
+    windowType,
+    filters: { ...filters },
+    eligibleCount,
+    riskRate,
+    estimatedAvgAllocation,
+    rowsEvaluated: rows.filter((entry) => entry.output && !entry.error).length
+  };
 };
 
 const DemoProofPageInner = () => {
@@ -276,6 +517,8 @@ const DemoProofPageInner = () => {
   const [shareWarning, setShareWarning] = useState<string | null>(null);
   const [proofCopyStatus, setProofCopyStatus] = useState<string | null>(null);
   const [manifestCopyStatus, setManifestCopyStatus] = useState<string | null>(null);
+  const [packageExportStatus, setPackageExportStatus] = useState<string | null>(null);
+  const [isFinalDecision, setIsFinalDecision] = useState(false);
   const [proofArtifactSeed, setProofArtifactSeed] = useState<{
     walletSnapshot: string[];
     criteriaSetId: CriteriaSetId;
@@ -286,6 +529,9 @@ const DemoProofPageInner = () => {
     policyHash: string;
     outputHash: string;
   } | null>(null);
+  const [runHistory, setRunHistory] = useState<ProofRunSnapshot[]>([]);
+  const filtersRef = useRef<HTMLDivElement | null>(null);
+  const compareRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const runIdRef = useRef(0);
   const initializedRef = useRef(false);
@@ -516,50 +762,7 @@ const DemoProofPageInner = () => {
   }, [baseUrl, isHydrated, safeCriteriaSetId, validEntries, windowType]);
 
   const filteredResults = useMemo<ProofWalletRow[]>(() => {
-    return rows.filter((entry) => {
-      if (entry.error || !entry.output) {
-        return true;
-      }
-
-      if (filters.verified !== 'all') {
-        const shouldBeVerified = filters.verified === 'true';
-        if (entry.output.verified_usage !== shouldBeVerified) {
-          return false;
-        }
-      }
-
-      const summary = entry.output.usage_summary;
-      if (summary.tx_count < filters.minTxCount) {
-        return false;
-      }
-      if (summary.days_active < filters.minDaysActive) {
-        return false;
-      }
-      if (summary.unique_contracts < filters.minUniqueContracts) {
-        return false;
-      }
-
-      if (insightsEnabled && entry.insights) {
-        const farmPercent = entry.insights.farming_probability * 100;
-        if (entry.insights.overall_score < filters.minScore) {
-          return false;
-        }
-        if (entry.insights.overall_score > filters.maxScore) {
-          return false;
-        }
-        if (farmPercent < filters.minFarmPercent) {
-          return false;
-        }
-        if (farmPercent > filters.maxFarmPercent) {
-          return false;
-        }
-        if (filters.tag !== 'all' && entry.insights.behavior_tag !== filters.tag) {
-          return false;
-        }
-      }
-
-      return true;
-    });
+    return rows.filter((entry) => matchesResultFilters(entry, filters, insightsEnabled));
   }, [filters, rows, insightsEnabled]);
 
   const sortedResults = useMemo<ProofWalletRow[]>(() => {
@@ -806,6 +1009,46 @@ const DemoProofPageInner = () => {
     return JSON.stringify(proofPackageManifest, null, 2);
   }, [proofPackageManifest]);
 
+  const proofPolicyJson = useMemo(() => {
+    if (!proofPackageManifest) {
+      return null;
+    }
+    return JSON.stringify(proofPackageManifest.policy, null, 2);
+  }, [proofPackageManifest]);
+
+  const inputHashReferenceText = useMemo(() => {
+    if (!proofPackageManifest) {
+      return null;
+    }
+    return [
+      'IndexFlow Input Dataset Hash Reference',
+      `campaign_id: ${proofPackageManifest.campaign_id}`,
+      `input_hash: ${proofPackageManifest.input.hash}`,
+      `wallet_count: ${proofPackageManifest.input.wallet_snapshot.length}`,
+      `window_type: ${proofPackageManifest.input.window_type}`,
+      '',
+      'This reference identifies the exact wallet snapshot used to reproduce the decision.',
+      'Load the wallet snapshot matching this hash before replaying the evaluator.'
+    ].join('\n');
+  }, [proofPackageManifest]);
+
+  const engineMetadataJson = useMemo(() => {
+    if (!proofPackageManifest) {
+      return null;
+    }
+    return JSON.stringify(
+      {
+        engine_version: proofPackageManifest.engine_version,
+        package_version: proofPackageManifest.package_version,
+        criteria_set_id: proofPackageManifest.policy.criteria_set_id,
+        reproducible: proofPackageManifest.reproducible,
+        statement: proofPackageManifest.statement
+      },
+      null,
+      2
+    );
+  }, [proofPackageManifest]);
+
   const decisionConfidence = useMemo<DecisionConfidence | null>(() => {
     if (!proofPackageManifest) {
       return null;
@@ -817,11 +1060,11 @@ const DemoProofPageInner = () => {
       return null;
     }
 
-    const dataCompleteness = clampPercent(
+    const dataCoverageScore = clampPercent(
       ((validEntries - invalidList.length) / Math.max(validEntries, 1)) * 100
     );
-    const walletSampleSize = clampPercent((Math.min(validRowCount, 50) / 50) * 100);
-    const modelCoverage = clampPercent(
+    const sampleSizeReliability = clampPercent((Math.min(validRowCount, 50) / 50) * 100);
+    const featureCompleteness = clampPercent(
       (successfulRows.filter((entry) => entry.insights || entry.commentary).length / validRowCount) *
         100
     );
@@ -830,23 +1073,437 @@ const DemoProofPageInner = () => {
       const behaviorTag = entry.insights?.behavior_tag;
       return farmProbability >= 0.5 || behaviorTag === 'suspected_farm';
     }).length;
-    const riskDistribution = clampPercent(100 - (riskyRows / validRowCount) * 100);
+    const riskAdjustedConfidence = clampPercent(100 - (riskyRows / validRowCount) * 100);
     const score = Math.round(
-      dataCompleteness * 0.3 +
-        walletSampleSize * 0.2 +
-        modelCoverage * 0.25 +
-        riskDistribution * 0.25
+      dataCoverageScore * 0.3 +
+        sampleSizeReliability * 0.25 +
+        riskAdjustedConfidence * 0.25 +
+        featureCompleteness * 0.2
     );
 
     return {
       score,
       reliabilityLabel: getReliabilityLabel(score),
-      dataCompleteness,
-      walletSampleSize,
-      modelCoverage,
-      riskDistribution
+      dataCoverageScore,
+      sampleSizeReliability,
+      riskAdjustedConfidence,
+      featureCompleteness
     };
   }, [invalidList.length, proofPackageManifest, rows, validEntries]);
+
+  const optimizationInsight = useMemo<OptimizationInsight | null>(() => {
+    if (!insightsEnabled) {
+      return null;
+    }
+
+    const currentMinScore = Math.max(0, Math.min(filters.minScore, filters.maxScore));
+    const candidatePool = rows.filter((entry) =>
+      matchesOptimizationBaseFilters(entry, filters)
+    );
+
+    if (!candidatePool.length) {
+      return null;
+    }
+
+    const baselineEligible = candidatePool.filter(
+      (entry) => (entry.insights?.overall_score ?? 0) >= currentMinScore
+    );
+
+    if (baselineEligible.length < 2) {
+      return null;
+    }
+
+    const baselineRiskyCount = baselineEligible.filter(isRiskyWallet).length;
+    const baselineRiskRate = (baselineRiskyCount / baselineEligible.length) * 100;
+    const thresholdOptions = Array.from(
+      new Set(
+        [currentMinScore + 5, currentMinScore + 10, currentMinScore + 15].filter(
+          (threshold) => threshold <= Math.min(filters.maxScore, 95)
+        )
+      )
+    );
+
+    let bestCandidate: OptimizationInsight | null = null;
+    let bestScore = Number.NEGATIVE_INFINITY;
+
+    thresholdOptions.forEach((threshold) => {
+      const nextEligible = baselineEligible.filter(
+        (entry) => (entry.insights?.overall_score ?? 0) >= threshold
+      );
+
+      if (!nextEligible.length || nextEligible.length === baselineEligible.length) {
+        return;
+      }
+
+      const nextRiskyCount = nextEligible.filter(isRiskyWallet).length;
+      const suggestedRiskRate = (nextRiskyCount / nextEligible.length) * 100;
+      const riskReductionPct =
+        baselineRiskRate > 0
+          ? ((baselineRiskRate - suggestedRiskRate) / baselineRiskRate) * 100
+          : 0;
+      const budgetUtilizationChangePct =
+        ((nextEligible.length - baselineEligible.length) / baselineEligible.length) * 100;
+      const retainedEligiblePct = (nextEligible.length / baselineEligible.length) * 100;
+      const candidateScore =
+        riskReductionPct - Math.abs(budgetUtilizationChangePct) * 0.65 + retainedEligiblePct * 0.08;
+
+      if (candidateScore <= bestScore) {
+        return;
+      }
+
+      const assistantSummary =
+        riskReductionPct >= 20
+          ? `Raising the score floor removes more borderline, higher-risk wallets while keeping most of the currently eligible cohort in range.`
+          : `A modest score increase tightens the eligible set without materially over-correcting the budget.`;
+
+      bestScore = candidateScore;
+      bestCandidate = {
+        currentMinScore,
+        suggestedMinScore: threshold,
+        eligibleBefore: baselineEligible.length,
+        eligibleAfter: nextEligible.length,
+        eligibleCountChange: nextEligible.length - baselineEligible.length,
+        riskReductionPct,
+        budgetUtilizationChangePct,
+        retainedEligiblePct,
+        baselineRiskRate,
+        suggestedRiskRate,
+        assistantSummary
+      };
+    });
+
+    return bestCandidate;
+  }, [filters, insightsEnabled, rows]);
+
+  const riskAnalysis = useMemo<RiskAnalysisItem[]>(() => {
+    if (!insightsEnabled) {
+      return [];
+    }
+
+    const eligibleRows = rows.filter((entry) => {
+      if (!entry.output || entry.error || !entry.insights) {
+        return false;
+      }
+      return filteredResults.some((candidate) => candidate.wallet === entry.wallet);
+    });
+
+    if (!eligibleRows.length) {
+      return [];
+    }
+
+    const suspectedFarmRows = eligibleRows.filter(
+      (entry) => entry.insights?.behavior_tag === 'suspected_farm'
+    );
+    const lowDiversityRows = eligibleRows.filter(
+      (entry) => (entry.output?.usage_summary.unique_contracts ?? 0) <= 2
+    );
+    const youngWalletRows = eligibleRows.filter(
+      (entry) => (entry.output?.usage_summary.days_active ?? 0) <= 7
+    );
+    const sybilRiskRows = eligibleRows.filter(
+      (entry) => (entry.insights?.farming_probability ?? 0) >= 0.4
+    );
+
+    const risks: RiskAnalysisItem[] = [];
+
+    if (youngWalletRows.length > 0) {
+      risks.push({
+        id: 'wallet-age',
+        title: 'Recent wallets are passing eligibility',
+        detail: `${youngWalletRows.length} wallets have low activity age, which increases the chance of short-lived or throwaway participation.`,
+        severity:
+          youngWalletRows.length / eligibleRows.length >= 0.2 ? 'high' : 'medium',
+        affectedWallets: youngWalletRows.length,
+        suggestions: [
+          'Increase minimum wallet age',
+          'Require more active days before eligibility',
+          'Review borderline wallets created in the latest window'
+        ]
+      });
+    }
+
+    if (lowDiversityRows.length > 0) {
+      risks.push({
+        id: 'contract-diversity',
+        title: 'Low contract diversity weakens behavioral confidence',
+        detail: `${lowDiversityRows.length} wallets interact with very few unique contracts, which can indicate narrow scripted usage rather than organic activity.`,
+        severity:
+          lowDiversityRows.length / eligibleRows.length >= 0.25 ? 'high' : 'medium',
+        affectedWallets: lowDiversityRows.length,
+        suggestions: [
+          'Exclude wallets with low contract diversity',
+          'Raise the minimum unique contracts threshold',
+          'Prioritize wallets with broader protocol interaction'
+        ]
+      });
+    }
+
+    if (sybilRiskRows.length > 0 || suspectedFarmRows.length > 0) {
+      const affectedWallets = Math.max(sybilRiskRows.length, suspectedFarmRows.length);
+      risks.push({
+        id: 'sybil-risk',
+        title: 'Sybil-like behavior is still present in the eligible set',
+        detail: `${affectedWallets} wallets show elevated farm probability or are already tagged as suspected farm accounts.`,
+        severity:
+          affectedWallets / eligibleRows.length >= 0.18 ? 'high' : 'medium',
+        affectedWallets,
+        suggestions: [
+          'Tighten sybil risk threshold',
+          'Raise the minimum score floor for borderline wallets',
+          'Lower the maximum allowed farm risk percentage'
+        ]
+      });
+    }
+
+    return risks;
+  }, [filteredResults, insightsEnabled, rows]);
+
+  const latestRun = runHistory[runHistory.length - 1] ?? null;
+  const previousRun = runHistory[runHistory.length - 2] ?? null;
+  const runComparison = useMemo(() => {
+    if (!latestRun || !previousRun) {
+      return null;
+    }
+
+    return {
+      from: previousRun,
+      to: latestRun,
+      eligibleDifference: latestRun.eligibleCount - previousRun.eligibleCount,
+      riskDifference: latestRun.riskRate - previousRun.riskRate,
+      allocationDifference:
+        latestRun.estimatedAvgAllocation - previousRun.estimatedAvgAllocation
+    };
+  }, [latestRun, previousRun]);
+
+  const benchmarkInsights = useMemo<BenchmarkInsight[]>(() => {
+    if (!rows.length || !summary.total) {
+      return [];
+    }
+
+    const eligibleRatePct =
+      validEntries > 0 ? (summary.total / Math.max(validEntries, 1)) * 100 : 0;
+    const sybilRatioPct = summary.suspected_farm_rate * 100;
+    const insights: BenchmarkInsight[] = [];
+
+    if (sybilRatioPct > proofBenchmarks.typicalSybilRatioPct + 3) {
+      insights.push({
+        id: 'sybil',
+        label: 'Sybil benchmark',
+        headline: 'This campaign has higher sybil ratio than average.',
+        detail: `High-risk share is ${Math.round(sybilRatioPct)}% versus a typical campaign baseline near ${proofBenchmarks.typicalSybilRatioPct}%.`,
+        tone: 'higher_risk'
+      });
+    } else if (sybilRatioPct < proofBenchmarks.typicalSybilRatioPct - 3) {
+      insights.push({
+        id: 'sybil',
+        label: 'Sybil benchmark',
+        headline: 'This campaign has lower sybil ratio than average.',
+        detail: `High-risk share is ${Math.round(sybilRatioPct)}% versus a typical campaign baseline near ${proofBenchmarks.typicalSybilRatioPct}%.`,
+        tone: 'stronger'
+      });
+    } else {
+      insights.push({
+        id: 'sybil',
+        label: 'Sybil benchmark',
+        headline: 'This campaign is close to the typical sybil ratio.',
+        detail: `High-risk share is ${Math.round(sybilRatioPct)}%, broadly in line with the internal campaign baseline of ${proofBenchmarks.typicalSybilRatioPct}%.`,
+        tone: 'typical'
+      });
+    }
+
+    if (eligibleRatePct < proofBenchmarks.typicalEligibleRatePct - 5) {
+      insights.push({
+        id: 'eligibility',
+        label: 'Eligibility benchmark',
+        headline: 'Your eligible rate is below typical campaigns.',
+        detail: `Current eligible rate is ${Math.round(eligibleRatePct)}% compared with a typical campaign baseline near ${proofBenchmarks.typicalEligibleRatePct}%.`,
+        tone: 'below_typical'
+      });
+    } else if (eligibleRatePct > proofBenchmarks.typicalEligibleRatePct + 5) {
+      insights.push({
+        id: 'eligibility',
+        label: 'Eligibility benchmark',
+        headline: 'Your eligible rate is above typical campaigns.',
+        detail: `Current eligible rate is ${Math.round(eligibleRatePct)}% compared with a typical campaign baseline near ${proofBenchmarks.typicalEligibleRatePct}%.`,
+        tone: 'stronger'
+      });
+    } else {
+      insights.push({
+        id: 'eligibility',
+        label: 'Eligibility benchmark',
+        headline: 'Your eligible rate is close to typical campaigns.',
+        detail: `Current eligible rate is ${Math.round(eligibleRatePct)}%, which tracks closely against the internal baseline of ${proofBenchmarks.typicalEligibleRatePct}%.`,
+        tone: 'typical'
+      });
+    }
+
+    if (summary.avg_score >= proofBenchmarks.typicalAverageScore + 4) {
+      insights.push({
+        id: 'score',
+        label: 'Quality benchmark',
+        headline: 'Wallet quality is stronger than the typical campaign cohort.',
+        detail: `Average score is ${Math.round(summary.avg_score)} versus a typical campaign baseline near ${proofBenchmarks.typicalAverageScore}.`,
+        tone: 'stronger'
+      });
+    } else if (summary.avg_score <= proofBenchmarks.typicalAverageScore - 4) {
+      insights.push({
+        id: 'score',
+        label: 'Quality benchmark',
+        headline: 'Wallet quality is weaker than the typical campaign cohort.',
+        detail: `Average score is ${Math.round(summary.avg_score)} versus a typical campaign baseline near ${proofBenchmarks.typicalAverageScore}.`,
+        tone: 'below_typical'
+      });
+    }
+
+    return insights;
+  }, [rows.length, summary, validEntries]);
+
+  const finalDecisionStatus: FinalDecisionStatus = isFinalDecision
+    ? 'finalized'
+    : rows.length > 0
+      ? 'reviewed'
+      : 'draft';
+  const isDecisionLocked = finalDecisionStatus === 'finalized';
+
+  const riskSummaryJson = useMemo(() => {
+    if (!proofPackageManifest) {
+      return null;
+    }
+
+    return JSON.stringify(
+      {
+        eligible_wallets: summary.total,
+        suspected_farm_count: summary.suspected_farm_count,
+        suspected_farm_rate_percent: Number((summary.suspected_farm_rate * 100).toFixed(2)),
+        decision_confidence: decisionConfidence
+          ? {
+              score_percent: decisionConfidence.score,
+              data_coverage_score: Math.round(decisionConfidence.dataCoverageScore),
+              sample_size_reliability: Math.round(
+                decisionConfidence.sampleSizeReliability
+              ),
+              risk_adjusted_confidence: Math.round(
+                decisionConfidence.riskAdjustedConfidence
+              ),
+              feature_completeness: Math.round(decisionConfidence.featureCompleteness)
+            }
+          : null,
+        comparative_benchmarks: benchmarkInsights.map((insight) => ({
+          label: insight.label,
+          headline: insight.headline,
+          detail: insight.detail
+        })),
+        risk_analysis: riskAnalysis.map((risk) => ({
+          title: risk.title,
+          severity: risk.severity,
+          affected_wallets: risk.affectedWallets,
+          suggestions: risk.suggestions
+        }))
+      },
+      null,
+      2
+    );
+  }, [benchmarkInsights, decisionConfidence, proofPackageManifest, riskAnalysis, summary]);
+
+  const decisionJson = useMemo(() => {
+    if (!proofPackageManifest) {
+      return null;
+    }
+
+    return JSON.stringify(
+      {
+        campaign_id: campaignId,
+        criteria_set_id: safeCriteriaSetId,
+        window_type: windowType,
+        filters,
+        summary: {
+          total: summary.total,
+          verified_true: summary.verified_true,
+          verified_false: summary.verified_false,
+          average_score: Number(summary.avg_score.toFixed(2)),
+          suspected_farm_rate_percent: Number((summary.suspected_farm_rate * 100).toFixed(2))
+        },
+        optimization_insight: optimizationInsight
+          ? {
+              suggested_min_score: optimizationInsight.suggestedMinScore,
+              eligible_count_change: optimizationInsight.eligibleCountChange,
+              risk_reduction_percent: Number(
+                optimizationInsight.riskReductionPct.toFixed(2)
+              ),
+              budget_utilization_change_percent: Number(
+                optimizationInsight.budgetUtilizationChangePct.toFixed(2)
+              )
+            }
+          : null,
+        latest_run: latestRun,
+        comparison: runComparison
+          ? {
+              from: runComparison.from.label,
+              to: runComparison.to.label,
+              eligible_difference: runComparison.eligibleDifference,
+              risk_difference_percent: Number(runComparison.riskDifference.toFixed(2)),
+              allocation_difference: Number(
+                runComparison.allocationDifference.toFixed(2)
+              )
+            }
+          : null
+      },
+      null,
+      2
+    );
+  }, [
+    campaignId,
+    filters,
+    latestRun,
+    optimizationInsight,
+    proofPackageManifest,
+    runComparison,
+    safeCriteriaSetId,
+    summary,
+    windowType
+  ]);
+
+  const decisionPackageExportJson = useMemo(() => {
+    if (!proofPackageManifest || !decisionJson || !riskSummaryJson) {
+      return null;
+    }
+
+    return JSON.stringify(
+      {
+        package_type: 'indexflow-decision-package/v1',
+        status: 'Ready for protocol execution',
+        generated_at: new Date().toISOString(),
+        assets: {
+          wallet_allocation_csv: {
+            filename: `wallet-allocation-${campaignId}.csv`,
+            content: buildProofCsvContent(sortedResults)
+          },
+          decision_json: JSON.parse(decisionJson),
+          proof_manifest: proofPackageManifest,
+          risk_summary: JSON.parse(riskSummaryJson)
+        }
+      },
+      null,
+      2
+    );
+  }, [campaignId, decisionJson, proofPackageManifest, riskSummaryJson, sortedResults]);
+
+  const handleApplySaferConfiguration = () => {
+    setFilters((prev) => {
+      const nextMinScore = optimizationInsight
+        ? Math.max(prev.minScore, optimizationInsight.suggestedMinScore)
+        : Math.max(prev.minScore, 65);
+
+      return {
+        ...prev,
+        minDaysActive: Math.max(prev.minDaysActive, 10),
+        minUniqueContracts: Math.max(prev.minUniqueContracts, 3),
+        minScore: Math.min(nextMinScore, prev.maxScore),
+        maxFarmPercent: Math.min(prev.maxFarmPercent, 35),
+        sortBy: 'farm_desc'
+      };
+    });
+  };
 
   const syncUrlWith = (walletsRaw: string, normalizedWallets: string[]) => {
     if (!isHydrated) {
@@ -924,6 +1581,7 @@ const DemoProofPageInner = () => {
     setProofArtifactSeed(null);
     setProofPackageHashes(null);
     setManifestCopyStatus(null);
+    setRunHistory([]);
   };
 
   const handleCancel = () => {
@@ -1011,6 +1669,11 @@ const DemoProofPageInner = () => {
   };
 
   const handleRun = async () => {
+    if (isDecisionLocked) {
+      setError('Decision is finalized. Unlocking is not available in this artifact.');
+      return;
+    }
+
     if (!baseUrl) {
       setError(
         'NEXT_PUBLIC_API_BASE_URL is not set. Add it to your frontend environment.'
@@ -1135,6 +1798,14 @@ const DemoProofPageInner = () => {
         if (isDev) {
           void runDeterminismCheck(merged, gateResult, usageWindow, runId);
         }
+        const snapshot = buildRunSnapshot({
+          id: runId,
+          rows: merged,
+          filters,
+          criteriaSetId: safeCriteriaSetId,
+          windowType
+        });
+        setRunHistory((prev) => [...prev.slice(-3), snapshot]);
       }
     } catch (err: unknown) {
       if (isAbortError(err)) {
@@ -1244,6 +1915,62 @@ const DemoProofPageInner = () => {
     setTimeout(() => setManifestCopyStatus(null), 1500);
   };
 
+  const handleDownloadInputHashReference = () => {
+    if (!inputHashReferenceText) {
+      return;
+    }
+    downloadTextFile('input-dataset-hash-reference.txt', inputHashReferenceText, 'text/plain');
+  };
+
+  const handleDownloadPolicyJson = () => {
+    if (!proofPolicyJson) {
+      return;
+    }
+    downloadTextFile('policy.json', proofPolicyJson, 'application/json');
+  };
+
+  const handleDownloadEngineMetadata = () => {
+    if (!engineMetadataJson) {
+      return;
+    }
+    downloadTextFile('engine-version-metadata.json', engineMetadataJson, 'application/json');
+  };
+
+  const handleExportDecisionPackage = () => {
+    if (!decisionPackageExportJson) {
+      setPackageExportStatus('Decision package unavailable.');
+      setTimeout(() => setPackageExportStatus(null), 1500);
+      return;
+    }
+
+    downloadTextFile(
+      `decision-package-${campaignId}.json`,
+      decisionPackageExportJson,
+      'application/json'
+    );
+    setPackageExportStatus('Exported decision package.');
+    setTimeout(() => setPackageExportStatus(null), 1500);
+  };
+
+  const handleAdjustCriteria = () => {
+    if (isDecisionLocked) {
+      return;
+    }
+    filtersRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const handleCompareRuns = () => {
+    compareRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const handleMarkFinalDecision = () => {
+    if (!rows.length) {
+      setError('Run and review the decision before finalizing it.');
+      return;
+    }
+    setIsFinalDecision(true);
+  };
+
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-10">
       <PageHeader
@@ -1273,7 +2000,7 @@ const DemoProofPageInner = () => {
         ensTotal={ensStats.total}
         ensResolved={ensStats.resolved}
         ensUnresolved={ensStats.unresolved}
-        disabled={loading}
+        disabled={loading || isDecisionLocked}
         loadingSample={sampleLoading}
       />
 
@@ -1288,7 +2015,7 @@ const DemoProofPageInner = () => {
                 <button
                   type="button"
                   onClick={handleRetryUnresolvedEns}
-                  disabled={ensRetrying || loading}
+                  disabled={ensRetrying || loading || isDecisionLocked}
                   className="rounded-full border border-rose-400/30 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-rose-100 transition hover:text-white disabled:cursor-not-allowed disabled:text-rose-300/60"
                 >
                   {ensRetrying ? 'Retrying...' : 'Retry unresolved ENS'}
@@ -1338,6 +2065,71 @@ const DemoProofPageInner = () => {
         </div>
       )}
 
+      <div className="rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(15,23,42,0.96),rgba(15,23,42,0.88))] p-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="max-w-3xl">
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+              Final Decision Status
+            </p>
+            <p className="mt-2 text-lg font-semibold text-white">
+              Promote this output from working draft to official campaign artifact.
+            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-300">
+              Finalization locks policy, allocation, and proof generation so the exported package represents the exact decision approved for campaign execution.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {(['draft', 'reviewed', 'finalized'] as FinalDecisionStatus[]).map((status) => (
+              <span
+                key={status}
+                className={`inline-flex items-center rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${
+                  finalDecisionStatus === status
+                    ? decisionStatusClass(status)
+                    : 'border-white/10 bg-white/5 text-slate-500'
+                }`}
+              >
+                {status} decision
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-300">
+            {finalDecisionStatus === 'draft' && 'Decision is still in draft mode. Run and review the artifact before finalizing.'}
+            {finalDecisionStatus === 'reviewed' && 'Decision has been reviewed and can now be locked as the official campaign artifact.'}
+            {finalDecisionStatus === 'finalized' && 'Decision is finalized. Policy, allocation, and proof are locked for execution.'}
+          </div>
+          <button
+            type="button"
+            onClick={handleMarkFinalDecision}
+            disabled={finalDecisionStatus !== 'reviewed'}
+            className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-100 hover:bg-emerald-500/20 hover:text-white disabled:cursor-not-allowed disabled:text-emerald-100/50"
+          >
+            Mark as final decision
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          {(['Policy', 'Allocation', 'Proof'] as const).map((item) => (
+            <div
+              key={item}
+              className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm"
+            >
+              <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{item}</p>
+              <p className="mt-2 font-semibold text-white">
+                {isDecisionLocked ? 'Locked' : 'Editable'}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                {isDecisionLocked
+                  ? `${item} is frozen in the final decision artifact.`
+                  : `${item} can still change before finalization.`}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
           <label className="flex flex-col gap-2 text-sm text-slate-300">
@@ -1347,7 +2139,7 @@ const DemoProofPageInner = () => {
               onChange={(event) =>
                 setWindowType(event.target.value as ProofWindowType)
               }
-              disabled={loading}
+              disabled={loading || isDecisionLocked}
               className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white"
             >
               <option value="last_7_days">Last 7 days</option>
@@ -1365,7 +2157,7 @@ const DemoProofPageInner = () => {
                   setCriteriaSetId(next);
                 }
               }}
-              disabled={loading}
+              disabled={loading || isDecisionLocked}
               className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white"
             >
               {criteriaSetIds.map((id) => (
@@ -1389,7 +2181,7 @@ const DemoProofPageInner = () => {
               <button
                 type="button"
                 onClick={handleRun}
-                disabled={loading || validEntries === 0 || !baseUrl}
+                disabled={loading || validEntries === 0 || !baseUrl || isDecisionLocked}
                 className="inline-flex items-center justify-center rounded-full bg-white px-6 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-black transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:bg-white/40 disabled:text-slate-500"
               >
                 {loading ? 'Running...' : 'Run'}
@@ -1434,7 +2226,149 @@ const DemoProofPageInner = () => {
         )}
       </div>
 
+      <div className="rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(15,23,42,0.96),rgba(15,23,42,0.86))] p-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="max-w-3xl">
+            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+              Iterate Decision
+            </p>
+            <p className="mt-2 text-lg font-semibold text-white">
+              Treat each run as a versioned decision, not a one-off output.
+            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-300">
+              Adjust the criteria, re-run the evaluator, and compare the latest decision against the previous version before locking policy.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleAdjustCriteria}
+              disabled={isDecisionLocked}
+              className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-200 hover:text-white"
+            >
+              Adjust criteria
+            </button>
+            <button
+              type="button"
+              onClick={handleRun}
+              disabled={loading || validEntries === 0 || !baseUrl || isDecisionLocked}
+              className="rounded-full border border-sky-400/30 bg-sky-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-sky-100 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:text-sky-100/50"
+            >
+              Re-run evaluation
+            </button>
+            <button
+              type="button"
+              onClick={handleCompareRuns}
+              disabled={!runComparison}
+              className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-100 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:text-emerald-100/50"
+            >
+              Compare runs
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Latest run</p>
+            <p className="mt-2 text-xl font-semibold text-white">
+              {latestRun?.label ?? 'No runs yet'}
+            </p>
+            <p className="mt-1 text-xs text-slate-400">
+              {latestRun
+                ? `${latestRun.eligibleCount} eligible • ${Math.round(latestRun.riskRate)}% risk`
+                : 'Run the evaluator to create a decision version.'}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Comparison status</p>
+            <p className="mt-2 text-xl font-semibold text-white">
+              {runComparison ? `${runComparison.from.label} vs ${runComparison.to.label}` : 'Waiting for v2'}
+            </p>
+            <p className="mt-1 text-xs text-slate-400">
+              {runComparison
+                ? 'Decision drift is measurable across eligibility, risk, and allocation.'
+                : 'Complete at least two runs to unlock comparison.'}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Criteria snapshot</p>
+            <p className="mt-2 text-xl font-semibold text-white">{safeCriteriaSetId}</p>
+            <p className="mt-1 text-xs text-slate-400">
+              Current thresholds: score {filters.minScore}-{filters.maxScore}, farm max {filters.maxFarmPercent}%
+            </p>
+          </div>
+        </div>
+      </div>
+
       {hasResults && !loading && <ProofKpis summary={summary} insightsEnabled={insightsEnabled} />}
+
+      {runComparison && (
+        <div
+          ref={compareRef}
+          className="rounded-3xl border border-emerald-400/20 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_42%),linear-gradient(135deg,rgba(15,23,42,0.96),rgba(15,23,42,0.84))] p-6"
+        >
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-emerald-200/80">
+                Compare Runs
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-white">
+                {runComparison.from.label} vs {runComparison.to.label}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-200">
+                This comparison turns the decision into an iterative process by showing how eligibility, risk posture, and estimated allocation move when the policy changes.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-right">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                Windows / criteria
+              </p>
+              <p className="mt-2 text-sm font-semibold text-white">
+                {runComparison.from.windowType} {'->'} {runComparison.to.windowType}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                {runComparison.from.criteriaSetId} {'->'} {runComparison.to.criteriaSetId}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-4 md:grid-cols-3">
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                Eligible difference
+              </p>
+              <p className="mt-2 text-3xl font-semibold text-white">
+                {formatSignedCount(runComparison.eligibleDifference)}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                {runComparison.from.eligibleCount} {'->'} {runComparison.to.eligibleCount} wallets
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                Risk difference
+              </p>
+              <p className="mt-2 text-3xl font-semibold text-white">
+                {formatSignedPercent(runComparison.riskDifference)}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                {Math.round(runComparison.from.riskRate)}% {'->'} {Math.round(runComparison.to.riskRate)}% high-risk share
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                Allocation difference
+              </p>
+              <p className="mt-2 text-3xl font-semibold text-white">
+                {formatSignedDecimal(runComparison.allocationDifference)}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                {runComparison.from.estimatedAvgAllocation.toFixed(2)} {'->'} {runComparison.to.estimatedAvgAllocation.toFixed(2)} est. avg allocation
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {hasResults && !loading && proofPackageManifest && proofManifestJson && (
         <div className="overflow-hidden rounded-3xl border border-sky-400/20 bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.18),_transparent_42%),linear-gradient(135deg,rgba(15,23,42,0.96),rgba(15,23,42,0.84))] p-6 shadow-[0_24px_80px_rgba(56,189,248,0.12)]">
@@ -1447,6 +2381,9 @@ const DemoProofPageInner = () => {
                 <span className="inline-flex items-center rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-100">
                   Reproducible
                 </span>
+                <span className="inline-flex items-center rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-100">
+                  Ready for protocol execution
+                </span>
               </div>
               <p className="mt-3 text-3xl font-semibold tracking-tight text-white">
                 Verifiable decision artifact
@@ -1457,31 +2394,100 @@ const DemoProofPageInner = () => {
             </div>
             <div className="flex flex-wrap items-center gap-3">
               {decisionConfidence && (
-                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-right">
-                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
-                    Decision Confidence
-                  </p>
-                  <div className="mt-2 flex items-center justify-end gap-2">
-                    <span
-                      title={`Confidence is affected by data completeness (${Math.round(
-                        decisionConfidence.dataCompleteness
-                      )}%), wallet sample size (${Math.round(
-                        decisionConfidence.walletSampleSize
-                      )}%), model coverage (${Math.round(
-                        decisionConfidence.modelCoverage
-                      )}%), and risk distribution (${Math.round(
-                        decisionConfidence.riskDistribution
-                      )}%).`}
-                      className={`inline-flex cursor-help items-center rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${getConfidenceBadgeClass(
-                        decisionConfidence.score
-                      )}`}
-                    >
-                      Confidence: {decisionConfidence.score}% -{' '}
-                      {decisionConfidence.reliabilityLabel}
-                    </span>
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-right">
+                  <div className="flex flex-col gap-3">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                        Decision Confidence
+                      </p>
+                      <div className="mt-2 flex items-center justify-end gap-2">
+                        <span
+                          title={`Confidence combines data coverage (${Math.round(
+                            decisionConfidence.dataCoverageScore
+                          )}%), sample size reliability (${Math.round(
+                            decisionConfidence.sampleSizeReliability
+                          )}%), risk-adjusted confidence (${Math.round(
+                            decisionConfidence.riskAdjustedConfidence
+                          )}%), and feature completeness (${Math.round(
+                            decisionConfidence.featureCompleteness
+                          )}%).`}
+                          className={`inline-flex cursor-help items-center rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${getConfidenceBadgeClass(
+                            decisionConfidence.score
+                          )}`}
+                        >
+                          Confidence: {decisionConfidence.score}% -{' '}
+                          {decisionConfidence.reliabilityLabel}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-left">
+                      <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                        Confidence Breakdown
+                      </p>
+                      <p className="mt-2 text-sm text-slate-300">
+                        Confidence = Data Quality (30%) + Sample Size (25%) + Risk Adjustment (25%) + Model Coverage (20%)
+                      </p>
+                      <div className="mt-3 space-y-3">
+                        <div>
+                          <div className="flex items-center justify-between gap-3 text-xs text-slate-300">
+                            <span>Data coverage score</span>
+                            <span>{Math.round(decisionConfidence.dataCoverageScore)}% x 30%</span>
+                          </div>
+                          <div className="mt-1 h-2 overflow-hidden rounded-full bg-white/10">
+                            <div
+                              className="h-full rounded-full bg-sky-400/80"
+                              style={{ width: `${decisionConfidence.dataCoverageScore}%` }}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between gap-3 text-xs text-slate-300">
+                            <span>Sample size reliability</span>
+                            <span>{Math.round(decisionConfidence.sampleSizeReliability)}% x 25%</span>
+                          </div>
+                          <div className="mt-1 h-2 overflow-hidden rounded-full bg-white/10">
+                            <div
+                              className="h-full rounded-full bg-emerald-400/80"
+                              style={{ width: `${decisionConfidence.sampleSizeReliability}%` }}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between gap-3 text-xs text-slate-300">
+                            <span>Risk-adjusted confidence</span>
+                            <span>{Math.round(decisionConfidence.riskAdjustedConfidence)}% x 25%</span>
+                          </div>
+                          <div className="mt-1 h-2 overflow-hidden rounded-full bg-white/10">
+                            <div
+                              className="h-full rounded-full bg-amber-400/80"
+                              style={{ width: `${decisionConfidence.riskAdjustedConfidence}%` }}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between gap-3 text-xs text-slate-300">
+                            <span>Feature completeness</span>
+                            <span>{Math.round(decisionConfidence.featureCompleteness)}% x 20%</span>
+                          </div>
+                          <div className="mt-1 h-2 overflow-hidden rounded-full bg-white/10">
+                            <div
+                              className="h-full rounded-full bg-violet-400/80"
+                              style={{ width: `${decisionConfidence.featureCompleteness}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
+              <button
+                type="button"
+                onClick={handleExportDecisionPackage}
+                className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-100 hover:bg-emerald-500/20 hover:text-white"
+              >
+                Export decision package
+              </button>
               <button
                 type="button"
                 onClick={handleCopyManifest}
@@ -1489,6 +2495,9 @@ const DemoProofPageInner = () => {
               >
                 Copy manifest JSON
               </button>
+              {packageExportStatus && (
+                <span className="text-xs text-slate-300">{packageExportStatus}</span>
+              )}
               {manifestCopyStatus && (
                 <span className="text-xs text-slate-300">{manifestCopyStatus}</span>
               )}
@@ -1534,6 +2543,365 @@ const DemoProofPageInner = () => {
             </div>
           </div>
 
+          <div className="mt-6 rounded-2xl border border-emerald-400/20 bg-emerald-500/5 p-5">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div className="max-w-3xl">
+                <p className="text-xs uppercase tracking-[0.2em] text-emerald-200/80">
+                  Decision Package Export
+                </p>
+                <p className="mt-2 text-lg font-semibold text-white">
+                  Ready for protocol execution
+                </p>
+                <p className="mt-2 text-sm leading-6 text-slate-200">
+                  Export a single package that bundles the wallet allocation CSV, decision JSON, proof manifest, and risk summary for downstream protocol, ops, and governance teams.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleExportDecisionPackage}
+                className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-100 hover:bg-emerald-500/20 hover:text-white"
+              >
+                Export decision package
+              </button>
+            </div>
+
+            <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                  Wallet allocation CSV
+                </p>
+                <p className="mt-2 text-sm text-slate-200">
+                  Team-ready wallet list with usage, scores, risk tags, and proof hashes.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                  Decision JSON
+                </p>
+                <p className="mt-2 text-sm text-slate-200">
+                  Criteria, summary, optimization, and iteration context for the current run.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                  Proof manifest
+                </p>
+                <p className="mt-2 text-sm text-slate-200">
+                  Reproducibility artifact with input, policy, engine, and output hashes.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                  Risk summary
+                </p>
+                <p className="mt-2 text-sm text-slate-200">
+                  Cohort risk posture, confidence factors, benchmarks, and mitigation signals.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-5">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div className="max-w-3xl">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                  How to Reproduce This Decision
+                </p>
+                <p className="mt-2 text-lg font-semibold text-white">
+                  Replay the same decision with the same inputs, policy, and evaluator.
+                </p>
+                <div className="mt-4 grid gap-3">
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                      Step 1
+                    </p>
+                    <p className="mt-2 text-sm text-slate-200">
+                      Load wallet snapshot <span className="font-mono text-sky-100">{shortenHash(proofPackageManifest.input.hash)}</span> and confirm it matches the input dataset hash reference.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                      Step 2
+                    </p>
+                    <p className="mt-2 text-sm text-slate-200">
+                      Apply policy config from criteria set <span className="font-mono text-sky-100">{proofPackageManifest.policy.criteria_set_id}</span> using the exported policy JSON and the same window settings.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                      Step 3
+                    </p>
+                    <p className="mt-2 text-sm text-slate-200">
+                      Run evaluator version <span className="font-mono text-sky-100">{proofPackageManifest.engine_version}</span> and compare the reproduced outputs against output hash <span className="font-mono text-sky-100">{shortenHash(proofPackageManifest.output.hash)}</span>.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="w-full max-w-md rounded-2xl border border-sky-400/20 bg-sky-500/5 p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-sky-200/80">
+                  Download Audit Assets
+                </p>
+                <p className="mt-2 text-sm leading-6 text-slate-200">
+                  Export the exact references needed to verify or independently replay this decision package.
+                </p>
+                <div className="mt-4 flex flex-col gap-3">
+                  <button
+                    type="button"
+                    onClick={handleDownloadInputHashReference}
+                    className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-200 hover:text-white"
+                  >
+                    Download input dataset hash reference
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadPolicyJson}
+                    className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-200 hover:text-white"
+                  >
+                    Download policy JSON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadEngineMetadata}
+                    className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-200 hover:text-white"
+                  >
+                    Download engine version metadata
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                Decision Summary
+              </p>
+              <p className="mt-2 text-lg font-semibold text-white">
+                Current policy keeps {summary.total} wallets in scope with a {Math.round(summary.avg_score)} average score.
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-300">
+                {decisionConfidence
+                  ? `Confidence is ${decisionConfidence.score}% and the current cohort carries a ${Math.round(
+                      optimizationInsight?.baselineRiskRate ?? summary.suspected_farm_rate * 100
+                    )}% high-risk share under the active thresholds.`
+                  : `The current cohort shows a ${Math.round(
+                      summary.suspected_farm_rate * 100
+                    )}% suspected farming rate under the active thresholds.`}
+              </p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                    Eligible now
+                  </p>
+                  <p className="mt-2 text-2xl font-semibold text-white">{summary.total}</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                    Avg score
+                  </p>
+                  <p className="mt-2 text-2xl font-semibold text-white">
+                    {Math.round(summary.avg_score)}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                    Risk share
+                  </p>
+                  <p className="mt-2 text-2xl font-semibold text-white">
+                    {Math.round(
+                      optimizationInsight?.baselineRiskRate ?? summary.suspected_farm_rate * 100
+                    )}
+                    %
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-sky-300/20 bg-[linear-gradient(160deg,rgba(14,165,233,0.14),rgba(15,23,42,0.28))] p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-sky-200/80">
+                    Optimization Insights
+                  </p>
+                  <p className="mt-2 text-lg font-semibold text-white">
+                    IndexFlow suggests these changes to improve fairness and reduce risk.
+                  </p>
+                </div>
+                {optimizationInsight && (
+                  <span className="inline-flex items-center rounded-full border border-sky-300/20 bg-sky-400/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-100">
+                    Assistant Recommendation
+                  </span>
+                )}
+              </div>
+
+              {optimizationInsight ? (
+                <>
+                  <p className="mt-3 text-sm leading-6 text-slate-200">
+                    {optimizationInsight.assistantSummary}
+                  </p>
+                  <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                      Suggested threshold adjustment
+                    </p>
+                    <p className="mt-2 text-base font-semibold text-white">
+                      Increase min score from {optimizationInsight.currentMinScore} to{' '}
+                      {optimizationInsight.suggestedMinScore}.
+                    </p>
+                  </div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                      <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                        Eligible count change
+                      </p>
+                      <p className="mt-2 text-2xl font-semibold text-white">
+                        {formatSignedCount(optimizationInsight.eligibleCountChange)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        {optimizationInsight.eligibleBefore} {'->'} {optimizationInsight.eligibleAfter} wallets
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                      <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                        Risk reduction
+                      </p>
+                      <p className="mt-2 text-2xl font-semibold text-white">
+                        {Math.round(optimizationInsight.riskReductionPct)}%
+                      </p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        {Math.round(optimizationInsight.baselineRiskRate)}% {'->'}{' '}
+                        {Math.round(optimizationInsight.suggestedRiskRate)}% high-risk share
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                      <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                        Budget utilization change
+                      </p>
+                      <p className="mt-2 text-2xl font-semibold text-white">
+                        {formatSignedPercent(optimizationInsight.budgetUtilizationChangePct)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        Retains {Math.round(optimizationInsight.retainedEligiblePct)}% of the current cohort
+                      </p>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <p className="mt-3 text-sm leading-6 text-slate-300">
+                  Current thresholds already look relatively tight for this cohort. Load insight-enabled results to generate a score-based recommendation.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {benchmarkInsights.length > 0 && (
+            <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-5">
+              <div className="max-w-3xl">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                  Comparative Benchmarks
+                </p>
+                <p className="mt-2 text-lg font-semibold text-white">
+                  Relative campaign context from internal aggregated baselines.
+                </p>
+                <p className="mt-2 text-sm leading-6 text-slate-300">
+                  These comparisons show how the current decision stacks up against typical campaign patterns, so the output reads as above-average, below-typical, or in-family rather than just isolated numbers.
+                </p>
+              </div>
+
+              <div className="mt-5 grid gap-4 lg:grid-cols-3">
+                {benchmarkInsights.map((insight) => (
+                  <div
+                    key={insight.id}
+                    className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                  >
+                    <span
+                      className={`inline-flex items-center rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${benchmarkToneClass(
+                        insight.tone
+                      )}`}
+                    >
+                      {insight.label}
+                    </span>
+                    <p className="mt-3 text-base font-semibold text-white">
+                      {insight.headline}
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-slate-300">
+                      {insight.detail}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-5">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="max-w-3xl">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                  Risk Analysis
+                </p>
+                <p className="mt-2 text-lg font-semibold text-white">
+                  Turn detected risk into an explicit policy response.
+                </p>
+                <p className="mt-2 text-sm leading-6 text-slate-300">
+                  IndexFlow highlights where the current cohort still looks vulnerable and maps each signal to a concrete mitigation.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleApplySaferConfiguration}
+                disabled={isDecisionLocked}
+                className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-100 transition hover:bg-emerald-500/20 hover:text-white disabled:cursor-not-allowed disabled:text-emerald-100/50"
+              >
+                Apply safer configuration
+              </button>
+            </div>
+
+            {riskAnalysis.length > 0 ? (
+              <div className="mt-5 grid gap-4 lg:grid-cols-3">
+                {riskAnalysis.map((risk) => (
+                  <div
+                    key={risk.id}
+                    className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <span
+                        className={`inline-flex items-center rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${riskSeverityClass(
+                          risk.severity
+                        )}`}
+                      >
+                        {risk.severity} risk
+                      </span>
+                      <span className="text-xs text-slate-400">
+                        {risk.affectedWallets} wallets affected
+                      </span>
+                    </div>
+                    <p className="mt-3 text-base font-semibold text-white">{risk.title}</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-300">{risk.detail}</p>
+                    <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+                      <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                        Mitigation actions
+                      </p>
+                      <div className="mt-3 flex flex-col gap-2">
+                        {risk.suggestions.map((suggestion) => (
+                          <div
+                            key={suggestion}
+                            className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200"
+                          >
+                            {suggestion}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
+                No elevated cohort-level risks were detected under the current insight coverage.
+              </div>
+            )}
+          </div>
+
           <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -1554,12 +2922,14 @@ const DemoProofPageInner = () => {
 
       {hasResults && !loading && (
         <>
-          <ProofFilters
-            value={filters}
-            onChange={setFilters}
-            disabled={loading}
-            insightsEnabled={insightsEnabled}
-          />
+          <div ref={filtersRef}>
+            <ProofFilters
+              value={filters}
+              onChange={setFilters}
+              disabled={loading || isDecisionLocked}
+              insightsEnabled={insightsEnabled}
+            />
+          </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-400">
             <div className="flex flex-wrap items-center gap-3">
