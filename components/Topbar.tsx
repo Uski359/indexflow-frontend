@@ -3,8 +3,6 @@
 import Link from 'next/link';
 import { Sparkles } from 'lucide-react';
 
-import ChainSelector from './ChainSelector';
-import WalletButton from './WalletButton';
 import AppNavigation from './navigation/AppNavigation';
 
 const Topbar = () => {
@@ -24,10 +22,6 @@ const Topbar = () => {
             </div>
           </Link>
           <AppNavigation />
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <ChainSelector />
-          <WalletButton />
         </div>
       </div>
     </header>
