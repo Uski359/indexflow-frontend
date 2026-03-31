@@ -4,7 +4,6 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 
 import ErrorState from '@/components/ui/ErrorState';
-import PageHeader from '@/components/ui/PageHeader';
 import { demoApiFetch, getDemoApiBaseUrl } from '@/lib/api';
 import {
   buildEvaluationWallets,
@@ -2008,7 +2007,7 @@ const DemoProofPageInner = () => {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-10">
       <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,_rgba(248,113,113,0.18),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(34,197,94,0.14),_transparent_30%),linear-gradient(135deg,rgba(10,15,28,0.98),rgba(15,23,42,0.92))] p-6 shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
-        <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+        <div className="flex flex-col gap-8">
           <div className="max-w-3xl">
             <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-slate-400">
               <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
@@ -2026,15 +2025,26 @@ const DemoProofPageInner = () => {
               around the users most likely to create value.
             </p>
           </div>
-          <div className="grid gap-2 rounded-[1.5rem] border border-white/10 bg-black/20 p-4 text-xs uppercase tracking-[0.18em] text-slate-300 sm:grid-cols-5">
-            {['Upload', 'Analyze', 'Optimize', 'Launch', 'Results'].map((step, index) => (
-              <div
-                key={step}
-                className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-center"
-              >
-                {index + 1}. {step}
-              </div>
-            ))}
+
+          <div className="rounded-[1.5rem] border border-white/10 bg-black/20 p-4">
+            <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">
+              Flow
+            </p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              {['Upload', 'Analyze', 'Optimize', 'Launch', 'Results'].map((step, index) => (
+                <div
+                  key={step}
+                  className="rounded-[1.25rem] border border-white/10 bg-white/5 px-4 py-3 text-center"
+                >
+                  <div className="mx-auto flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-black/30 text-[11px] font-semibold text-slate-200">
+                    {index + 1}
+                  </div>
+                  <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-200">
+                    {step}
+                  </p>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -2076,17 +2086,6 @@ const DemoProofPageInner = () => {
           </div>
         ) : null}
       </section>
-
-      <PageHeader
-        eyebrow="ROI Analysis"
-        title="Airdrop ROI Engine"
-        subtitle="Upload wallets, detect low-value recipients, optimize your distribution, and launch with more confidence."
-        actions={
-          <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.2em] text-slate-400">
-            Base URL: {baseUrl ?? 'Not set'}
-          </div>
-        }
-      />
 
       {error && (
         <ErrorState title="Proof flow unavailable" description={error} />
