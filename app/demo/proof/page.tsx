@@ -33,11 +33,12 @@ import {
 } from '@/lib/proofUrlState';
 
 import DecisionProduct from './components/DecisionProduct';
-import ProofFilters, { type ProofFilterState } from './components/ProofFilters';
+import { type ProofFilterState } from './components/ProofFilters';
 import ProofKpis from './components/ProofKpis';
 import ProofTable from './components/ProofTable';
 import WalletDetailModal from './components/WalletDetailModal';
 import WalletInput from './components/WalletInput';
+import LaunchYourCampaignCard from '@/src/features/campaignLaunch/LaunchYourCampaignCard';
 
 const campaignId = 'airdrop_v1';
 const fallbackSampleWallets = [
@@ -209,13 +210,6 @@ const hashText = async (value: string): Promise<string> => {
   return fallback.toString(16).padStart(8, '0');
 };
 
-const shortenHash = (value: string) => {
-  if (value.length <= 18) {
-    return value;
-  }
-  return `${value.slice(0, 12)}...${value.slice(-8)}`;
-};
-
 const downloadTextFile = (filename: string, content: string, contentType: string) => {
   if (typeof window === 'undefined') {
     return;
@@ -297,16 +291,6 @@ const getReliabilityLabel = (
     return 'Moderate reliability decision';
   }
   return 'Low reliability decision';
-};
-
-const getConfidenceBadgeClass = (score: number) => {
-  if (score >= 80) {
-    return 'border-emerald-400/30 bg-emerald-500/10 text-emerald-100';
-  }
-  if (score >= 60) {
-    return 'border-amber-400/30 bg-amber-500/10 text-amber-100';
-  }
-  return 'border-rose-400/30 bg-rose-500/10 text-rose-100';
 };
 
 const matchesResultFilters = (
@@ -415,29 +399,32 @@ const formatSignedCount = (value: number) => `${value > 0 ? '+' : ''}${value}`;
 const formatSignedDecimal = (value: number) =>
   `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
 
+const formatUsd = (value: number) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0
+  }).format(Math.max(0, value));
+
+const formatWholePercent = (value: number) => `${Math.round(value)}%`;
+
+const classifyUserType = (entry: ProofWalletRow): 'Farmer' | 'Real' | 'Whale' => {
+  const score = entry.insights?.overall_score ?? 0;
+  const farmProbability = entry.insights?.farming_probability ?? 0;
+  if (farmProbability >= 0.5 || entry.insights?.behavior_tag === 'suspected_farm') {
+    return 'Farmer';
+  }
+  if (score >= 85) {
+    return 'Whale';
+  }
+  return 'Real';
+};
+
 const proofBenchmarks = {
   typicalSybilRatioPct: 12,
   typicalEligibleRatePct: 58,
   typicalAverageScore: 68
 } as const;
-
-const riskSeverityClass = (severity: RiskAnalysisItem['severity']) =>
-  severity === 'high'
-    ? 'border-rose-400/30 bg-rose-500/10 text-rose-100'
-    : 'border-amber-400/30 bg-amber-500/10 text-amber-100';
-
-const benchmarkToneClass = (tone: BenchmarkInsight['tone']) => {
-  switch (tone) {
-    case 'higher_risk':
-      return 'border-rose-400/30 bg-rose-500/10 text-rose-100';
-    case 'below_typical':
-      return 'border-amber-400/30 bg-amber-500/10 text-amber-100';
-    case 'stronger':
-      return 'border-emerald-400/30 bg-emerald-500/10 text-emerald-100';
-    default:
-      return 'border-sky-400/30 bg-sky-500/10 text-sky-100';
-  }
-};
 
 const decisionStatusClass = (status: FinalDecisionStatus) => {
   switch (status) {
@@ -531,6 +518,8 @@ const DemoProofPageInner = () => {
     outputHash: string;
   } | null>(null);
   const [runHistory, setRunHistory] = useState<ProofRunSnapshot[]>([]);
+  const [campaignBudget, setCampaignBudget] = useState(25000);
+  const [autoOptimizeDistribution, setAutoOptimizeDistribution] = useState(true);
   const filtersRef = useRef<HTMLDivElement | null>(null);
   const compareRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -1825,6 +1814,50 @@ const DemoProofPageInner = () => {
   const progressPercent = progress.total
     ? Math.min(100, Math.round((progress.processed / progress.total) * 100))
     : 0;
+  const lowValueWalletPercent = summary.total
+    ? (summary.verified_false / summary.total) * 100
+    : 0;
+  const highValueWalletPercent = summary.total
+    ? (summary.verified_true / summary.total) * 100
+    : 0;
+  const estimatedWastedBudget = campaignBudget * (lowValueWalletPercent / 100);
+  const suggestedEligibleWallets = autoOptimizeDistribution
+    ? optimizationInsight?.eligibleAfter ?? summary.verified_true
+    : summary.verified_true;
+  const optimizedRecipientCount = Math.max(0, suggestedEligibleWallets);
+  const optimizedAllocation = optimizedRecipientCount
+    ? campaignBudget / optimizedRecipientCount
+    : 0;
+  const budgetSaved = autoOptimizeDistribution ? estimatedWastedBudget : 0;
+  const potentialRoiImprovement = autoOptimizeDistribution
+    ? optimizationInsight?.riskReductionPct ?? lowValueWalletPercent
+    : 0;
+  const proofParticipants = useMemo(
+    () =>
+      sortedResults
+        .filter((entry) => entry.output && !entry.error && entry.output.verified_usage)
+        .map((entry) => ({
+          wallet: entry.wallet,
+          score: entry.insights?.overall_score ?? 0,
+          walletAgeDays: Math.max(entry.output?.usage_summary.days_active ?? 0, 1),
+          activeDaysLast14: Math.min(entry.output?.usage_summary.days_active ?? 0, 14),
+          proofUsageEvents: entry.output?.usage_summary.tx_count ?? 0
+        })),
+    [sortedResults]
+  );
+  const userTypeBreakdown = useMemo(() => {
+    return sortedResults.reduce(
+      (acc, entry) => {
+        if (!entry.output || entry.error) {
+          return acc;
+        }
+        const userType = classifyUserType(entry);
+        acc[userType] += 1;
+        return acc;
+      },
+      { Farmer: 0, Real: 0, Whale: 0 } as Record<'Farmer' | 'Real' | 'Whale', number>
+    );
+  }, [sortedResults]);
   const handleExportCsv = () => {
     exportProofCsv({
       rows: sortedResults,
@@ -1974,10 +2007,80 @@ const DemoProofPageInner = () => {
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-10">
+      <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,_rgba(248,113,113,0.18),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(34,197,94,0.14),_transparent_30%),linear-gradient(135deg,rgba(10,15,28,0.98),rgba(15,23,42,0.92))] p-6 shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
+        <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+          <div className="max-w-3xl">
+            <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-slate-400">
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
+                Airdrop ROI Engine
+              </span>
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
+                Campaign {campaignId}
+              </span>
+            </div>
+            <h1 className="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-5xl">
+              Detect waste, reallocate budget, and launch a stronger airdrop.
+            </h1>
+            <p className="mt-4 max-w-2xl text-base leading-7 text-slate-200">
+              Show how much budget is leaking to low-value wallets, then optimize distribution
+              around the users most likely to create value.
+            </p>
+          </div>
+          <div className="grid gap-2 rounded-[1.5rem] border border-white/10 bg-black/20 p-4 text-xs uppercase tracking-[0.18em] text-slate-300 sm:grid-cols-5">
+            {['Upload', 'Analyze', 'Optimize', 'Launch', 'Results'].map((step, index) => (
+              <div
+                key={step}
+                className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-center"
+              >
+                {index + 1}. {step}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {hasResults && !loading ? (
+          <div className="mt-8 grid gap-4 lg:grid-cols-3">
+            <div className="rounded-[1.75rem] border border-rose-400/30 bg-rose-500/10 p-6">
+              <p className="text-xs uppercase tracking-[0.22em] text-rose-200">
+                Estimated Wasted Budget
+              </p>
+              <p className="mt-3 text-4xl font-semibold text-white">
+                {formatUsd(estimatedWastedBudget)}
+              </p>
+              <p className="mt-2 text-sm text-rose-100/80">
+                Equal distribution would send this much to low-value wallets.
+              </p>
+            </div>
+            <div className="rounded-[1.75rem] border border-amber-400/30 bg-amber-500/10 p-6">
+              <p className="text-xs uppercase tracking-[0.22em] text-amber-100">
+                Low-Value Wallets
+              </p>
+              <p className="mt-3 text-4xl font-semibold text-white">
+                {formatWholePercent(lowValueWalletPercent)}
+              </p>
+              <p className="mt-2 text-sm text-amber-100/80">
+                These wallets are the main source of reward leakage.
+              </p>
+            </div>
+            <div className="rounded-[1.75rem] border border-emerald-400/30 bg-emerald-500/10 p-6">
+              <p className="text-xs uppercase tracking-[0.22em] text-emerald-100">
+                Potential ROI Improvement
+              </p>
+              <p className="mt-3 text-4xl font-semibold text-white">
+                +{formatWholePercent(potentialRoiImprovement)}
+              </p>
+              <p className="mt-2 text-sm text-emerald-100/80">
+                Estimated lift if you concentrate rewards on stronger wallets.
+              </p>
+            </div>
+          </div>
+        ) : null}
+      </section>
+
       <PageHeader
-        eyebrow="Proof"
-        title="Proof of usage"
-        subtitle={`Multi-wallet evaluation for campaign ${campaignId}.`}
+        eyebrow="ROI Analysis"
+        title="Airdrop ROI Engine"
+        subtitle="Upload wallets, detect low-value recipients, optimize your distribution, and launch with more confidence."
         actions={
           <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.2em] text-slate-400">
             Base URL: {baseUrl ?? 'Not set'}
@@ -2004,6 +2107,85 @@ const DemoProofPageInner = () => {
         disabled={loading || isDecisionLocked}
         loadingSample={sampleLoading}
       />
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <section className="rounded-[1.75rem] border border-white/10 bg-white/5 p-5">
+          <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Analyze</p>
+          <h2 className="mt-2 text-xl font-semibold text-white">Run ROI Analysis</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-300">
+            Identify low-value wallets, estimate wasted budget, and quantify how much stronger the
+            campaign becomes after filtering.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleRun}
+              disabled={loading || validEntries === 0 || !baseUrl || isDecisionLocked}
+              className="inline-flex items-center justify-center rounded-full bg-white px-6 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-black transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:bg-white/40 disabled:text-slate-500"
+            >
+              {loading ? 'Running ROI Analysis...' : 'Run ROI Analysis'}
+            </button>
+            {loading ? (
+              <button
+                type="button"
+                onClick={handleCancel}
+                className="rounded-full border border-white/10 px-6 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-300 hover:text-white"
+              >
+                Cancel
+              </button>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="rounded-[1.75rem] border border-white/10 bg-white/5 p-5">
+          <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Optimize</p>
+          <h2 className="mt-2 text-xl font-semibold text-white">Optimize Your Distribution</h2>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <label className="flex flex-col gap-2 text-sm text-slate-300">
+              Total campaign budget
+              <input
+                type="number"
+                min={0}
+                step={100}
+                value={campaignBudget}
+                onChange={(event) => setCampaignBudget(Number(event.target.value || 0))}
+                className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-white"
+              />
+            </label>
+            <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-200">
+              <input
+                type="checkbox"
+                checked={autoOptimizeDistribution}
+                onChange={(event) => setAutoOptimizeDistribution(event.target.checked)}
+                className="h-4 w-4 rounded border-white/20 bg-transparent"
+              />
+              Auto-optimize distribution
+            </label>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                Optimized Allocation
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-white">{formatUsd(optimizedAllocation)}</p>
+            </div>
+            <div className="rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-4">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-100">
+                Budget Saved
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-white">{formatUsd(budgetSaved)}</p>
+            </div>
+            <div className="rounded-2xl border border-sky-400/20 bg-sky-500/10 p-4">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-sky-100">
+                Efficiency Improvement
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-white">
+                +{formatWholePercent(potentialRoiImprovement)}
+              </p>
+            </div>
+          </div>
+        </section>
+      </div>
 
       {invalidList.length > 0 && (
         <div className="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-4 text-sm text-rose-100">
@@ -2066,7 +2248,160 @@ const DemoProofPageInner = () => {
         </div>
       )}
 
-      <div className="rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(15,23,42,0.96),rgba(15,23,42,0.88))] p-5">
+      {hasResults && !loading && (
+        <>
+          <section className="rounded-[2rem] border border-white/10 bg-[linear-gradient(135deg,rgba(15,23,42,0.98),rgba(15,23,42,0.9))] p-6">
+            <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Analysis Output</p>
+            <h2 className="mt-2 text-2xl font-semibold text-white">Budget Waste Summary</h2>
+            <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+              <div className="rounded-[1.5rem] border border-white/10 bg-black/20 p-5">
+                <p className="text-lg font-semibold text-white">
+                  You are wasting approximately {formatUsd(estimatedWastedBudget)} of your
+                  airdrop budget.
+                </p>
+                <p className="mt-2 text-sm leading-6 text-slate-300">
+                  {formatWholePercent(lowValueWalletPercent)} of wallets look low-value and{' '}
+                  {formatWholePercent(highValueWalletPercent)} qualify as higher-value recipients
+                  under the current analysis.
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
+                <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-5">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                    % low-value wallets
+                  </p>
+                  <p className="mt-2 text-3xl font-semibold text-white">
+                    {formatWholePercent(lowValueWalletPercent)}
+                  </p>
+                </div>
+                <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-5">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                    % high-value wallets
+                  </p>
+                  <p className="mt-2 text-3xl font-semibold text-white">
+                    {formatWholePercent(highValueWalletPercent)}
+                  </p>
+                </div>
+                <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-5">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                    Estimated wasted budget
+                  </p>
+                  <p className="mt-2 text-3xl font-semibold text-white">
+                    {formatUsd(estimatedWastedBudget)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-[1.75rem] border border-rose-400/20 bg-[linear-gradient(180deg,rgba(244,63,94,0.12),rgba(15,23,42,0.55))] p-6">
+              <p className="text-xs uppercase tracking-[0.22em] text-rose-200">
+                Before Optimization
+              </p>
+              <p className="mt-3 text-xl font-semibold text-white">Equal distribution, high waste</p>
+              <div className="mt-4 space-y-3 text-sm leading-6 text-slate-200">
+                <p>Every wallet gets the same allocation regardless of quality.</p>
+                <p>{formatUsd(estimatedWastedBudget)} is likely wasted on low-value recipients.</p>
+                <p>{summary.verified_false} wallets drag down campaign ROI.</p>
+              </div>
+            </div>
+            <div className="rounded-[1.75rem] border border-emerald-400/20 bg-[linear-gradient(180deg,rgba(16,185,129,0.12),rgba(15,23,42,0.55))] p-6">
+              <p className="text-xs uppercase tracking-[0.22em] text-emerald-100">
+                After Optimization
+              </p>
+              <p className="mt-3 text-xl font-semibold text-white">
+                Filtered wallets, concentrated allocation, improved ROI
+              </p>
+              <div className="mt-4 space-y-3 text-sm leading-6 text-slate-200">
+                <p>{optimizedRecipientCount} stronger wallets receive the concentrated budget.</p>
+                <p>{formatUsd(budgetSaved)} is preserved for higher-value users.</p>
+                <p>Projected efficiency improves by +{formatWholePercent(potentialRoiImprovement)}.</p>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-[2rem] border border-white/10 bg-white/5 p-6">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+              <div className="max-w-2xl">
+                <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Campaign Launch</p>
+                <h2 className="mt-2 text-2xl font-semibold text-white">Launch Optimized Campaign</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-300">
+                  Use the optimized distribution result below, then open advanced settings only if
+                  you need deeper campaign controls.
+                </p>
+              </div>
+              <a
+                href="#launch-your-campaign"
+                className="inline-flex items-center justify-center rounded-full bg-emerald-400 px-6 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-950 transition hover:bg-emerald-300"
+              >
+                Launch with Optimized Allocation
+              </a>
+            </div>
+          </section>
+
+          <section className="rounded-[2rem] border border-white/10 bg-[linear-gradient(135deg,rgba(15,23,42,0.98),rgba(15,23,42,0.9))] p-6">
+            <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Results Dashboard</p>
+            <h2 className="mt-2 text-2xl font-semibold text-white">Business Outcome Snapshot</h2>
+            <div className="mt-5 grid gap-4 lg:grid-cols-3">
+              <div className="rounded-[1.5rem] border border-emerald-400/20 bg-emerald-500/10 p-5">
+                <p className="text-xs uppercase tracking-[0.2em] text-emerald-100">ROI improvement</p>
+                <p className="mt-2 text-3xl font-semibold text-white">
+                  +{formatWholePercent(potentialRoiImprovement)}
+                </p>
+                <p className="mt-2 text-sm text-emerald-100/80">High-value users rewarded.</p>
+              </div>
+              <div className="rounded-[1.5rem] border border-sky-400/20 bg-sky-500/10 p-5">
+                <p className="text-xs uppercase tracking-[0.2em] text-sky-100">Budget saved</p>
+                <p className="mt-2 text-3xl font-semibold text-white">{formatUsd(budgetSaved)}</p>
+                <p className="mt-2 text-sm text-sky-100/80">Low-value wallets filtered out.</p>
+              </div>
+              <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-5">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                  Wallet segmentation breakdown
+                </p>
+                <div className="mt-3 space-y-2 text-sm text-slate-200">
+                  <p>Whale: {userTypeBreakdown.Whale}</p>
+                  <p>Real: {userTypeBreakdown.Real}</p>
+                  <p>Farmer: {userTypeBreakdown.Farmer}</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-[2rem] border border-white/10 bg-white/5 p-6">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Wallet Review</p>
+                <h2 className="mt-2 text-2xl font-semibold text-white">Wallet Value Breakdown</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-300">
+                  Review who looks real, who looks risky, and where expected value is concentrated.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleExportCsv}
+                className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-200 hover:text-white"
+              >
+                Export optimized distribution result
+              </button>
+            </div>
+            <div className="mt-5">
+              <ProofTable
+                results={sortedResults}
+                insightsEnabled={insightsEnabled}
+                onSelect={(row) => setSelected(row)}
+              />
+            </div>
+          </section>
+        </>
+      )}
+
+      <details className="rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(15,23,42,0.96),rgba(15,23,42,0.88))] p-5">
+        <summary className="cursor-pointer list-none text-sm font-semibold uppercase tracking-[0.2em] text-slate-200">
+          Advanced Decision Status
+        </summary>
+        <div className="mt-4">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-3xl">
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
@@ -2129,9 +2464,14 @@ const DemoProofPageInner = () => {
             </div>
           ))}
         </div>
-      </div>
+        </div>
+      </details>
 
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+      <details className="rounded-2xl border border-white/10 bg-white/5 p-4">
+        <summary className="cursor-pointer list-none text-sm font-semibold uppercase tracking-[0.2em] text-slate-200">
+          Advanced Analysis Controls
+        </summary>
+        <div className="mt-4">
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
           <label className="flex flex-col gap-2 text-sm text-slate-300">
             Window
@@ -2225,9 +2565,14 @@ const DemoProofPageInner = () => {
             </div>
           </div>
         )}
-      </div>
+        </div>
+      </details>
 
-      <div className="rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(15,23,42,0.96),rgba(15,23,42,0.86))] p-5">
+      <details className="rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(15,23,42,0.96),rgba(15,23,42,0.86))] p-5">
+        <summary className="cursor-pointer list-none text-sm font-semibold uppercase tracking-[0.2em] text-slate-200">
+          Advanced Optimization History
+        </summary>
+        <div className="mt-4">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="max-w-3xl">
             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
@@ -2299,7 +2644,8 @@ const DemoProofPageInner = () => {
             </p>
           </div>
         </div>
-      </div>
+        </div>
+      </details>
 
       {hasResults && !loading && <ProofKpis summary={summary} insightsEnabled={insightsEnabled} />}
 
@@ -2371,43 +2717,61 @@ const DemoProofPageInner = () => {
         </div>
       )}
 
+      {hasResults && !loading && (
+        <details className="rounded-[2rem] border border-white/10 bg-white/5 p-6">
+          <summary className="cursor-pointer list-none text-sm font-semibold uppercase tracking-[0.2em] text-slate-200">
+            Advanced Campaign Settings
+          </summary>
+          <div className="mt-5">
+            <LaunchYourCampaignCard participants={proofParticipants} supportsProofUsageFilter />
+          </div>
+        </details>
+      )}
+
       {hasResults && !loading && proofPackageManifest && (
-        <DecisionProduct
-          campaignId={campaignId}
-          finalDecisionStatus={finalDecisionStatus}
-          summary={summary}
-          validEntries={validEntries}
-          decisionConfidence={decisionConfidence}
-          sortedResults={sortedResults}
-          insightsEnabled={insightsEnabled}
-          filters={filters}
-          setFilters={setFilters}
-          sortLabel={sortLabelMap[filters.sortBy]}
-          errorCount={errorCount}
-          topErrorHint={topErrorHint}
-          proofPackageManifest={proofPackageManifest}
-          riskAnalysis={riskAnalysis}
-          loading={loading}
-          baseUrl={baseUrl}
-          isDecisionLocked={isDecisionLocked}
-          filtersRef={filtersRef}
-          shareStatus={shareStatus}
-          proofCopyStatus={proofCopyStatus}
-          manifestCopyStatus={manifestCopyStatus}
-          packageExportStatus={packageExportStatus}
-          onFinalizeDecision={handleMarkFinalDecision}
-          onRerunEvaluation={handleRun}
-          onExportResults={handleExportCsv}
-          onCopyShareLink={handleCopyShareLink}
-          onCopyProofs={handleCopyProofs}
-          onCopyManifest={handleCopyManifest}
-          onExportDecisionPackage={handleExportDecisionPackage}
-          onApplySaferConfiguration={handleApplySaferConfiguration}
-          onDownloadInputHashReference={handleDownloadInputHashReference}
-          onDownloadPolicyJson={handleDownloadPolicyJson}
-          onDownloadEngineMetadata={handleDownloadEngineMetadata}
-          onSelectWallet={(row) => setSelected(row)}
-        />
+        <details className="rounded-[2rem] border border-white/10 bg-black/20 p-6">
+          <summary className="cursor-pointer list-none text-sm font-semibold uppercase tracking-[0.2em] text-slate-200">
+            Advanced Proof And Policy Details
+          </summary>
+          <div className="mt-5">
+            <DecisionProduct
+              campaignId={campaignId}
+              finalDecisionStatus={finalDecisionStatus}
+              summary={summary}
+              validEntries={validEntries}
+              decisionConfidence={decisionConfidence}
+              sortedResults={sortedResults}
+              insightsEnabled={insightsEnabled}
+              filters={filters}
+              setFilters={setFilters}
+              sortLabel={sortLabelMap[filters.sortBy]}
+              errorCount={errorCount}
+              topErrorHint={topErrorHint}
+              proofPackageManifest={proofPackageManifest}
+              riskAnalysis={riskAnalysis}
+              loading={loading}
+              baseUrl={baseUrl}
+              isDecisionLocked={isDecisionLocked}
+              filtersRef={filtersRef}
+              shareStatus={shareStatus}
+              proofCopyStatus={proofCopyStatus}
+              manifestCopyStatus={manifestCopyStatus}
+              packageExportStatus={packageExportStatus}
+              onFinalizeDecision={handleMarkFinalDecision}
+              onRerunEvaluation={handleRun}
+              onExportResults={handleExportCsv}
+              onCopyShareLink={handleCopyShareLink}
+              onCopyProofs={handleCopyProofs}
+              onCopyManifest={handleCopyManifest}
+              onExportDecisionPackage={handleExportDecisionPackage}
+              onApplySaferConfiguration={handleApplySaferConfiguration}
+              onDownloadInputHashReference={handleDownloadInputHashReference}
+              onDownloadPolicyJson={handleDownloadPolicyJson}
+              onDownloadEngineMetadata={handleDownloadEngineMetadata}
+              onSelectWallet={(row) => setSelected(row)}
+            />
+          </div>
+        </details>
       )}
 
       <WalletDetailModal

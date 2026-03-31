@@ -48,7 +48,7 @@ const routeRegistry: FeatureRoute[] = [
     href: '/demo/proof',
     label: 'Proof',
     description: 'Proof-of-usage evaluation workspace',
-    showInNav: true,
+    showInNav: false,
     matchMode: 'exact'
   },
   {
@@ -56,7 +56,7 @@ const routeRegistry: FeatureRoute[] = [
     href: '/demo/campaign/airdrop_v1',
     label: 'Campaign',
     description: 'Primary campaign review flow',
-    showInNav: true,
+    showInNav: false,
     matchMode: 'exact'
   },
   {

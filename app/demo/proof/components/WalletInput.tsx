@@ -33,9 +33,9 @@ const WalletInput = ({
     <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Wallets</p>
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Upload Wallet List</p>
           <p className="mt-1 text-sm text-slate-300">
-            Paste one per line, comma-separated, or mixed whitespace. ENS supported.
+            Paste wallets in any simple list format. ENS names are supported.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -45,7 +45,7 @@ const WalletInput = ({
             disabled={disabled}
             className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-200 hover:text-white disabled:cursor-not-allowed disabled:text-slate-500"
           >
-            Normalize
+            Clean list
           </button>
           <button
             type="button"
@@ -53,7 +53,7 @@ const WalletInput = ({
             disabled={disabled || loadingSample}
             className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-200 hover:text-white disabled:cursor-not-allowed disabled:text-slate-500"
           >
-            {loadingSample ? 'Loading...' : 'Paste sample (20 wallets)'}
+            {loadingSample ? 'Loading...' : 'Use sample list'}
           </button>
           <button
             type="button"
@@ -68,11 +68,13 @@ const WalletInput = ({
 
       <div className="mt-3 flex flex-wrap gap-4 text-[11px] uppercase tracking-[0.2em] text-slate-400">
         <span>
-          {totalCount} total / {validCount} valid / {invalidCount} invalid
+          {totalCount} wallets loaded / {validCount} ready / {invalidCount} need review
         </span>
-        <span>
-          ENS: {ensTotal} total / {ensResolved} resolved / {ensUnresolved} unresolved
-        </span>
+        {ensTotal > 0 ? (
+          <span>
+            ENS: {ensResolved} resolved / {ensUnresolved} unresolved
+          </span>
+        ) : null}
       </div>
 
       <textarea

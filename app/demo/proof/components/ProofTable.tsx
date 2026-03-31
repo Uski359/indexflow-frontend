@@ -11,7 +11,6 @@ type ProofTableProps = {
 };
 
 const formatNumber = (value: number) => new Intl.NumberFormat('en-US').format(value);
-const formatPercent = (value: number) => `${Math.round(value * 100)}%`;
 
 const shortenWallet = (wallet: string) => {
   if (wallet.length <= 12) {
@@ -20,54 +19,46 @@ const shortenWallet = (wallet: string) => {
   return `${wallet.slice(0, 6)}...${wallet.slice(-4)}`;
 };
 
-const sourceStyles: Record<ProofWalletRow['source'], string> = {
-  commentary: 'bg-emerald-500/15 text-emerald-100',
-  insights: 'bg-sky-500/15 text-sky-100',
-  core: 'bg-white/10 text-slate-200'
-};
-
-const sourceLabels: Record<ProofWalletRow['source'], string> = {
-  commentary: 'Commentary',
-  insights: 'Insights',
-  core: 'Core'
-};
-
-const getScoreBand = (score: number) => {
-  if (score >= 70) {
+const getUserType = (score: number, farmProbability: number, verified: boolean) => {
+  if (!verified || farmProbability >= 0.5) {
     return {
-      label: 'High',
-      className: 'border-emerald-400/30 bg-emerald-500/15 text-emerald-100'
-    };
-  }
-  if (score >= 40) {
-    return {
-      label: 'Medium',
-      className: 'border-amber-400/30 bg-amber-500/15 text-amber-100'
-    };
-  }
-  return {
-    label: 'Low',
-    className: 'border-rose-400/30 bg-rose-500/15 text-rose-100'
-  };
-};
-
-const getRiskBand = (farmPercent: number) => {
-  if (farmPercent >= 70) {
-    return {
-      label: 'High',
+      label: 'Farmer',
       className: 'border-rose-400/30 bg-rose-500/15 text-rose-100'
     };
   }
-  if (farmPercent >= 40) {
+  if (score >= 85) {
     return {
-      label: 'Medium',
-      className: 'border-amber-400/30 bg-amber-500/15 text-amber-100'
+      label: 'Whale',
+      className: 'border-emerald-400/30 bg-emerald-500/15 text-emerald-100'
     };
   }
   return {
-    label: 'Low',
-    className: 'border-emerald-400/30 bg-emerald-500/15 text-emerald-100'
+    label: 'Real',
+    className: 'border-sky-400/30 bg-sky-500/15 text-sky-100'
   };
+};
+
+const getExpectedValue = (score: number, farmProbability: number, verified: boolean) => {
+  if (!verified || farmProbability >= 0.5) {
+    return 'Low';
+  }
+  if (score >= 85) {
+    return 'High';
+  }
+  if (score >= 60) {
+    return 'Medium';
+  }
+  return 'Low';
+};
+
+const getScoreTone = (score: number) => {
+  if (score >= 85) {
+    return 'text-emerald-100';
+  }
+  if (score >= 60) {
+    return 'text-amber-100';
+  }
+  return 'text-rose-100';
 };
 
 const ProofTable = ({ results, insightsEnabled, onSelect }: ProofTableProps) => {
@@ -94,10 +85,9 @@ const ProofTable = ({ results, insightsEnabled, onSelect }: ProofTableProps) => 
             <tr className="border-b border-white/10">
               <th className="px-5 py-4">Wallet</th>
               <th className="px-5 py-4">Decision</th>
-              <th className="px-5 py-4">Score band</th>
-              <th className="px-5 py-4">Risk</th>
-              <th className="px-5 py-4">Activity</th>
-              <th className="px-5 py-4">Source</th>
+              <th className="px-5 py-4">User Type</th>
+              <th className="px-5 py-4">Expected Value</th>
+              <th className="px-5 py-4">Score (simplified)</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5">
@@ -106,9 +96,9 @@ const ProofTable = ({ results, insightsEnabled, onSelect }: ProofTableProps) => 
               const hasError = Boolean(entry.error) || !entry.output;
               const verified = entry.output?.verified_usage ?? false;
               const score = entry.insights?.overall_score ?? 0;
-              const farmPercent = Math.round((entry.insights?.farming_probability ?? 0) * 100);
-              const scoreBand = getScoreBand(score);
-              const riskBand = getRiskBand(farmPercent);
+              const farmProbability = entry.insights?.farming_probability ?? 0;
+              const userType = getUserType(score, farmProbability, verified);
+              const expectedValue = getExpectedValue(score, farmProbability, verified);
               const isTopWallet = !hasError && index < 5;
               const displayName = entry.display_name?.trim();
 
@@ -189,14 +179,21 @@ const ProofTable = ({ results, insightsEnabled, onSelect }: ProofTableProps) => 
                     {hasError ? (
                       <span className="text-slate-500">--</span>
                     ) : (
+                      <span
+                        className={`inline-flex w-fit items-center rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${userType.className}`}
+                      >
+                        {userType.label}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-5 py-5">
+                    {hasError ? (
+                      <span className="text-slate-500">--</span>
+                    ) : (
                       <div className="flex flex-col gap-2">
-                        <span
-                          className={`inline-flex w-fit items-center rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${scoreBand.className}`}
-                        >
-                          {scoreBand.label}
-                        </span>
-                        <span className="text-sm font-medium text-white">
-                          {insightsEnabled ? formatNumber(score) : '--'}
+                        <span className="text-sm font-medium text-white">{expectedValue}</span>
+                        <span className="text-xs text-slate-400">
+                          {verified ? 'Better reward candidate' : 'Low return candidate'}
                         </span>
                       </div>
                     )}
@@ -207,31 +204,17 @@ const ProofTable = ({ results, insightsEnabled, onSelect }: ProofTableProps) => 
                     ) : (
                       <div className="flex flex-col gap-2">
                         <span
-                          className={`inline-flex w-fit items-center rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] ${riskBand.className}`}
+                          className={`text-lg font-semibold ${getScoreTone(score)}`}
                         >
-                          {riskBand.label}
+                          {insightsEnabled ? Math.round(score) : '--'} / 100
                         </span>
-                        <span className="text-sm text-slate-300">{formatPercent((entry.insights?.farming_probability ?? 0))}</span>
+                        <span className="text-xs text-slate-400">
+                          {summary
+                            ? `${formatNumber(summary.tx_count)} tx • ${formatNumber(summary.days_active)} active days`
+                            : 'Activity unavailable'}
+                        </span>
                       </div>
                     )}
-                  </td>
-                  <td className="px-5 py-5 text-slate-300">
-                    {summary ? (
-                      <div className="space-y-1.5">
-                        <div>{formatNumber(summary.tx_count)} tx</div>
-                        <div>{formatNumber(summary.days_active)} active days</div>
-                        <div>{formatNumber(summary.unique_contracts)} contracts</div>
-                      </div>
-                    ) : (
-                      <span className="text-slate-500">Unavailable</span>
-                    )}
-                  </td>
-                  <td className="px-5 py-5">
-                    <span
-                      className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${sourceStyles[entry.source]}`}
-                    >
-                      {sourceLabels[entry.source]}
-                    </span>
                   </td>
                 </tr>
               );
