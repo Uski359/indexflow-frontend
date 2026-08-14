@@ -203,7 +203,7 @@ const DemoCampaignPage = () => {
 
       try {
         const wallets = await demoApiFetch<string[]>(
-          `/v1/campaign/${campaignId}/mock-wallets?count=500`
+          `/v1/campaign/${campaignId}/mock-wallets?count=320`
         );
         const end = Math.floor(Date.now() / 1000);
         const start = end - windowSeconds[windowType];
