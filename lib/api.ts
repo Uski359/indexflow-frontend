@@ -81,6 +81,56 @@ const normalizeHealth = (value: unknown): IndexerHealth => {
   };
 };
 
+export type ParticipantMetadata = {
+  fundingSource?: string;
+  activeDays?: number;
+  avgBetSize?: number;
+  simultaneousTx?: boolean;
+  [key: string]: unknown;
+};
+
+export type ParticipantRecord = {
+  id?: string;
+  address: string;
+  score: number;
+  sybilRisk: 'Low' | 'High' | string;
+  metadata: ParticipantMetadata;
+};
+
+const normalizeParticipants = (value: unknown): ParticipantRecord[] => {
+  if (Array.isArray(value)) {
+    return value as ParticipantRecord[];
+  }
+
+  if (typeof value === 'object' && value !== null) {
+    const candidate = value as Record<string, unknown>;
+    if (Array.isArray(candidate.items)) {
+      return candidate.items as ParticipantRecord[];
+    }
+    if (Array.isArray(candidate.results)) {
+      return candidate.results as ParticipantRecord[];
+    }
+  }
+
+  return [];
+};
+
+export const fetchParticipants = async (): Promise<ParticipantRecord[]> => {
+  const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/api/participants`, {
+    cache: 'no-store',
+    headers: {
+      Accept: 'application/json'
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Participants API ${response.status} for /api/participants`);
+  }
+
+  const data = await response.json();
+  return normalizeParticipants(data);
+};
+
 export const fetchRecentTransfers = async (options?: {
   chain?: string;
   limit?: number;
